@@ -192,6 +192,52 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
         _stop_worker_listener(worker_id)
 
 
+class _AtsCooledDown(Exception):
+    """Raised to abandon one job because its ATS is cooling down."""
+
+
+def _ats_is_cooled(ats_slug: str) -> bool:
+    """Cooldown check that can never take down a run on its own."""
+    try:
+        from applypilot.apply.pacing import is_cooled_down
+        from applypilot.database import get_connection
+        return is_cooled_down(get_connection(), ats_slug)
+    except Exception as e:
+        logger.warning("Cooldown check failed for %s: %s", ats_slug, e)
+        return False
+
+
+def _record_submission_proof(job: dict, outcome: str, ats_slug: str | None,
+                             worker_id: int, duration_ms: int | None,
+                             dry_run: bool = False) -> None:
+    """Record durable evidence of one submission attempt (section 11).
+
+    Dry runs are excluded: nothing was submitted, so recording proof would
+    poison the per-ATS health numbers with attempts no employer ever saw.
+    Never raises — losing an audit row must not fail a real application.
+    """
+    if dry_run:
+        return
+    try:
+        from applypilot.apply.pacing import record_proof
+        from applypilot.database import get_connection
+
+        screenshot = None
+        log_dir = config.APP_DIR / "logs"
+        if log_dir.exists():
+            shots = sorted(log_dir.glob(f"proof_*w{worker_id}*.png"),
+                           key=lambda p: p.stat().st_mtime, reverse=True)
+            if shots:
+                screenshot = str(shots[0])
+
+        record_proof(get_connection(), job["url"], outcome, ats=ats_slug,
+                     worker_id=worker_id, screenshot_path=screenshot,
+                     duration_ms=duration_ms)
+    except Exception as e:
+        logger.warning("Could not record submission proof for %s: %s",
+                       job.get("url"), e)
+
+
 def _worker_loop_body(
     worker_id: int, limit: int, target_url: str | None,
     min_score: int, max_score: int | None, max_age_days: int | None,
@@ -257,6 +303,20 @@ def _worker_loop_body(
             ats_slug = detect_ats(apply_url)
             if ats_slug:
                 add_event(f"[W{worker_id}] ATS: {ats_slug}")
+
+            # An ATS that pushed back earlier in this run is left alone.
+            # Section 11: back off on 403/429/Turnstile, park the application,
+            # and cool that ATS for the rest of the run rather than sending it
+            # the remaining sixteen.
+            if ats_slug and _ats_is_cooled(ats_slug):
+                from applypilot.apply.pacing import park_application
+                from applypilot.database import get_connection
+                park_application(get_connection(), job["url"], "other",
+                                 {"detail": f"{ats_slug} cooled down this run"})
+                release_lock(job["url"])
+                add_event(f"[W{worker_id}] {ats_slug} cooled down; parked")
+                was_skipped = True
+                raise _AtsCooledDown(ats_slug)
 
             if _this_reconnect_pid is not None:
                 # Reuse the existing Chrome — skip launch entirely
@@ -325,9 +385,34 @@ def _worker_loop_body(
                     failed += 1
                     _stop_event.set()
                     break
+                elif result.startswith("failed") and ats_slug:
+                    # A block signal means this ATS is pushing back. Cool it for
+                    # the rest of the run instead of sending it the remaining
+                    # applications and earning a restriction (section 11).
+                    reason = result.split(":", 1)[-1] if ":" in result else result
+                    try:
+                        from applypilot.apply.pacing import cool_down_ats, looks_like_a_block
+                        if looks_like_a_block(reason):
+                            cool_down_ats(get_connection(), ats_slug, reason[:120])
+                            add_event(f"[W{worker_id}] {ats_slug} blocked; cooling down")
+                    except Exception as cooldown_err:
+                        logger.warning("Cooldown on %s failed: %s", ats_slug, cooldown_err)
+                    _record_submission_proof(job, "failed", ats_slug, worker_id,
+                                             duration_ms, dry_run)
+                    mark_result(job["url"], "failed", reason,
+                                permanent=_is_permanent_failure(reason),
+                                duration_ms=duration_ms)
+                    _log_failed_attempt(job, reason, worker_id, duration_ms,
+                                        _is_permanent_failure(reason))
+                    failed += 1
+                    update_state(worker_id, jobs_failed=failed)
+                    break
+
                 elif result == "applied":
                     mark_result(job["url"], "applied", duration_ms=duration_ms)
                     _record_job_history(worker_id, job, result, duration_ms)
+                    _record_submission_proof(job, "applied", ats_slug, worker_id,
+                                             duration_ms, dry_run)
                     applied += 1
                     update_state(worker_id, jobs_applied=applied,
                                  jobs_done=applied + failed)
@@ -511,6 +596,11 @@ def _worker_loop_body(
                 break
             add_event(f"[W{worker_id}] Job skipped (Ctrl+C)")
             continue
+        except _AtsCooledDown:
+            # Already parked and released above; this just abandons the job
+            # without counting it as a failure. The ATS is having a bad day,
+            # the application is not.
+            pass
         except Exception as e:
             logger.exception("Worker %d launcher error", worker_id)
             add_event(f"[W{worker_id}] Launcher error: {type(e).__name__}: {str(e)[:35]}")
@@ -527,6 +617,16 @@ def _worker_loop_body(
         jobs_done += 1
         if target_url:
             break
+
+        # Randomized gap before the next application. Section 11: spread the
+        # batch across the run window, never burst. Runtime is not a
+        # constraint; an account restriction would be.
+        if not dry_run and not _stop_event.is_set():
+            from applypilot.apply.pacing import APPLICATION_DELAY_RANGE
+            import random as _random
+            gap = _random.uniform(*APPLICATION_DELAY_RANGE)
+            add_event(f"[W{worker_id}] Pacing {gap:.0f}s before next application")
+            _stop_event.wait(timeout=gap)
 
     update_state(worker_id, status="done", last_action="finished")
     return applied, failed
