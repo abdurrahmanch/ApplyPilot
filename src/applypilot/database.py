@@ -1598,15 +1598,23 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
         where += " AND discovered_at > datetime('now', ?)"
         params.append(f"-{max_age_days} days")
 
+    # Recency is the ranking, score is only a tiebreaker (CLAUDE.md section 6):
+    # the curated hiring.cafe queries are the real filter, so among jobs that
+    # clear the score floor the freshest postings win. `posted_at` is the
+    # employer-reported date and falls back to `discovered_at` when a source
+    # doesn't supply one. `_site_rank` still spreads results across companies
+    # so one employer's bulk posting can't monopolise a run.
     query = f"""
         SELECT * FROM (
             SELECT *, ROW_NUMBER() OVER (
                 PARTITION BY COALESCE(site, 'unknown')
-                ORDER BY discovered_at DESC
+                ORDER BY COALESCE(posted_at, discovered_at) DESC
             ) AS _site_rank
             FROM jobs WHERE {where}
         )
-        ORDER BY fit_score DESC NULLS LAST, _site_rank ASC, discovered_at DESC
+        ORDER BY COALESCE(posted_at, discovered_at) DESC,
+                 fit_score DESC NULLS LAST,
+                 _site_rank ASC
     """
     if limit > 0:
         query += " LIMIT ?"

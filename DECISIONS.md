@@ -139,3 +139,100 @@ Arch supplied `voice-profile.md` v1.2 directly (it was not on this machine).
 Stored read-only (mode 444) at `~/Documents/Repositories/voice-profile/voice-profile.md`
 with an empty `registers/` alongside it. `registers/job-applications.md` gets
 seeded at M5 per §10. No reconstruction from memory was performed.
+
+---
+
+## 2026-08-19 — M2 / M3
+
+### hiring.cafe: the documented API no longer exists
+
+`POST /api/search-jobs` returns 405 and `/api/search-jobs/get-total-count`
+returns 404. The host is `hiringcafe.com`, the site is a Firebase-gated Next.js
+app, and search results come from the page-data route:
+
+    GET /_next/data/{buildId}/index.json?searchState={json}&page={n}
+    headers: x-nextjs-data: 1
+
+- `buildId` (`window.__NEXT_DATA__.buildId`) changes on every hiring.cafe
+  deploy and is scraped per run, never cached.
+- The route requires an authenticated session, so requests are issued from
+  inside a persistent logged-in Chromium profile at
+  `~/.applypilot/hiringcafe-profile`, established once by `scripts/hc_login.py`.
+  This collapses the section 5 fallback ladder: rung 1 (plain HTTPS) is not
+  reachable at all now, so the browser path is the primary, not the fallback.
+- Pagination is `&page=N`, terminated by `ssrIsLastPage`.
+- **Descriptions are not inline.** Neither the search response nor the per-job
+  route (`/_next/data/{buildId}/jobs/{slug}.json`) carries posting text. This
+  contradicts section 5. Rows land in `discovered` and the enrich stage scrapes
+  `apply_url`; enrich is REQUIRED for this source, not a fallback.
+
+### D5 — Scoring is batched, and batching is load-bearing
+
+Measured with the CLI provider: a single trivial call costs ~$0.018 because
+each `claude -p` invocation re-sends ~26k tokens of system prompt. One call per
+job at ~1,400 jobs/month is ~$25/month, over the section 6 ceiling of $10.
+
+Batched at `SCORE_BATCH_SIZE = 10`, a real batch measured **$0.0632 for 10 jobs
+= $0.0063/job ≈ $9/month**. Batching is therefore a budget requirement, not an
+optimization. The batched path runs when `workers <= 1`; the threaded and
+sequential per-job paths are untouched and still available.
+
+A malformed batch degrades only its own jobs: any job whose block is missing
+from the response comes back `score=None` and re-enters the existing
+retry/backoff path on the next run.
+
+### D6 — The scoring prompt was written for a different person
+
+The inherited prompt hardcoded "The candidate is US-based (Seattle, WA)", a
+Go/Kotlin/K8s senior stack, and a Seattle-area commute rule, and reserved its
+top scores for Senior/Staff/Principal roles — the exact inverse of what
+Abdur-Rahman needs. Rewritten:
+
+- Candidate location now comes from `profile.json` rather than a literal.
+- Score bands target entry-level/new-grad/junior IC roles on his stack
+  (Java/Spring Boot/PostgreSQL, TypeScript/React/Next.js).
+- Senior/Staff/Principal/Lead/Manager titles are a hard 1-2, not a top score.
+- Roles requiring an active security clearance are a hard 1-2.
+- Years-of-experience bars are read literally: 0-3 ideal, 4-5 capped at 6,
+  6+ capped at 3.
+- Commute rule is Chicago metro; fully remote US roles are unrestricted.
+
+Verified on 20 real jobs: senior titles scored 1-2, "Web Developer" 9,
+"Backend Engineer, Multiplayer" 7. No parse errors.
+
+### D7 — Description truncation
+
+`SCORE_DESC_CHARS = 1800` (~300 words) per section 6, down from 6000. The
+tailor stage still reads the full description; that is where a disqualifier
+missed by truncation surfaces.
+
+### D8 — Recency ordering shipped
+
+`get_jobs_by_stage` now orders by `COALESCE(posted_at, discovered_at) DESC`
+first, with `fit_score DESC` as tiebreaker, and the per-company `ROW_NUMBER()`
+window reordered to match. Section 6 wanted `date_posted`; the column already
+exists as `posted_at` and hiring.cafe populates it from
+`estimated_publish_date`, so no migration was needed (this supersedes D3).
+
+### Query overlap resolved
+
+A live run proved the overlap: `remote-usa` returned 266 rows and
+`hybrid-chicago` added 2, because the remote query kept the Chicago and
+Illinois entries at all workplace types. Abdur-Rahman approved stripping them;
+`remote-usa.json` now carries only the United States / Remote location.
+
+### Candidate data
+
+`~/.applypilot/profile.json` (mode 600) and `~/.applypilot/resume.txt` are
+populated from his master resume plus values he supplied directly. A unique
+24-char password was generated for ATS accounts and written only to
+profile.json. `~/.applypilot/candidate-dossier.md` holds the full evidence
+base, including the binding constraint that Anasheed is schema-and-design only
+and must never be described with implementation verbs.
+
+### Naming
+
+He goes by **Abdur-Rahman**, not "Arch" as this document's section 1 uses, and
+his surname is written **"Ch"** only — deliberately truncated to limit
+doxxing. Never expand it in generated output; park any form demanding a full
+legal surname.

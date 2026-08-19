@@ -25,7 +25,7 @@ SCORE_PROMPT_TEMPLATE = """You are a job fit evaluator. Given a candidate's resu
 THE CANDIDATE: {candidate_summary}
 
 ⚠️ GEOGRAPHY CHECK — DO THIS FIRST, BEFORE ANYTHING ELSE:
-The candidate is US-based (Seattle, WA). Any role restricted to non-US geography is INELIGIBLE.
+The candidate is US-based ({candidate_location}). Any role restricted to non-US geography is INELIGIBLE.
 Read the FULL description for buried sentences like "This role will be remote and based in the UK"
 or "Remote — Ontario, BC or Alberta". A perfect tech stack on a non-US role is still INELIGIBLE.
 
@@ -44,18 +44,20 @@ If non_us_only, you MAY still produce a SCORE based on tech-stack fit (for audit
 eligibility tag is what determines whether the application proceeds.
 
 SCORING CRITERIA:
-- 10: Near-perfect IC engineering match. The role is a software/platform/infrastructure engineer position requiring the candidate's exact stack (Go/Kotlin/Python/Java, distributed systems, K8s). Seniority aligns (Senior/Staff/Principal). The candidate would be a top-tier applicant with minimal gaps.
-- 9: Excellent engineering match. Strong alignment on tech stack and seniority, with 1-2 gaps in secondary skills or slightly different domain.
-- 7-8: Good engineering match. Candidate has most required technical skills. Minor gaps in specific frameworks or domain experience, easily bridged.
-- 5-6: Moderate match. The role is engineering but uses a different primary stack, or there's a seniority mismatch (e.g., junior role or executive-only role with no IC component).
-- 3-4: Weak match. Engineering role but wrong specialization (frontend-only, mobile, ML research, data science), or a non-engineering role with some technical overlap.
-- 1-2: Poor match. Non-engineering role (recruiting, design, marketing, product management, sales), completely different field, OR non-US geographic restriction.
+- 10: Near-perfect match. An entry-level, new-grad, or junior IC software engineering role on the candidate's stack (Java/Spring Boot, backend services, PostgreSQL, or TypeScript/React/Next.js full-stack). Requires roughly 0-3 years and does not demand a degree already conferred before December 2026.
+- 9: Excellent match. Same shape, with 1-2 gaps in secondary skills or a slightly different domain.
+- 7-8: Good match. IC engineering, stack overlaps substantially, and the experience bar is within reach (up to ~4 years, or "3+ years" on a role that otherwise fits).
+- 5-6: Moderate match. Engineering, but a different primary stack (Go, Rust, C++, .NET), or an experience bar around 5 years, or a specialization the candidate touches only lightly.
+- 3-4: Weak match. Engineering but wrong specialization (ML research, data science, embedded, mobile-only, QA-only), or a non-engineering role with technical overlap.
+- 1-2: Poor match. Non-engineering role (recruiting, design, marketing, product management, sales), a senior/staff/principal/lead/manager role, a role requiring a security clearance, completely different field, OR non-US geographic restriction.
 
 ADDITIONAL RULES:
 - Non-engineering roles (recruiters, designers, PMs, marketing, sales, executive search) score 1-2 MAX regardless of seniority or domain.
-- Roles requiring a specific language the candidate doesn't know (Rust, C++, Ruby, Scala, Clojure) as the PRIMARY requirement score 4-6 max depending on transferability.
-- "CTO" or "VP Engineering" roles that are purely management with no IC engineering component score 5-6 max.
-- LOCATION is N/A: check the description for any office/city requirement. If the description implies onsite in a specific US city outside Seattle/Bellevue/Kirkland/Redmond, cap at 7.
+- Roles requiring a specific language the candidate doesn't know (Rust, C++, Go, Ruby, Scala, Clojure) as the PRIMARY requirement score 4-6 max depending on transferability.
+- Seniority is a hard gate, not a soft one. Senior, Staff, Principal, Lead, Architect, Manager, Director, and VP roles score 1-2 — the candidate graduates in December 2026 and cannot credibly fill them.
+- Roles demanding an active US security clearance (TS/SCI, Secret, Public Trust) score 1-2. The candidate has none.
+- Experience bars: treat "N+ years" literally. 0-3 years is ideal, 4-5 is a stretch (cap at 6), 6+ is a rejection (cap at 3).
+- Onsite roles: the candidate is in {candidate_location} and can commute in the Chicago metro. Onsite or hybrid roles outside commuting range that offer no relocation cap at 4. Fully remote US roles are fine anywhere.
 - Distinguish REQUIRED skills from NICE-TO-HAVE. Only penalize for missing required skills.
 - Value transferable experience: workflow orchestration, distributed systems, microservices, developer platforms transfer across domains.
 
@@ -261,8 +263,145 @@ def _build_candidate_summary(profile: dict) -> str:
         parts.append(f"Primary stack: {', '.join(languages[:8])}.")
     if platforms:
         parts.append(f"Platforms: {', '.join(platforms[:6])}.")
+    grad = (profile.get("availability") or {}).get("earliest_start_date")
+    if grad:
+        parts.append(f"Available: {grad}.")
     parts.append(f"Targets: {target}.")
     return " ".join(parts)
+
+
+def _candidate_location(profile: dict) -> str:
+    """Human-readable home location for the geography and commute rules."""
+    p = profile.get("personal", {})
+    city, state = p.get("city"), p.get("province_state")
+    if city and state:
+        return f"{city}, {state}"
+    return city or state or "the United States"
+
+
+# Scoring reads the title plus the head of the description only. Disqualifiers
+# (seniority, clearance, years-of-experience bars, non-US restrictions) live in
+# the first couple of paragraphs; the full text is what the tailor stage reads.
+# ~300 words at ~6 chars/word.
+SCORE_DESC_CHARS = 1800
+
+# Jobs per LLM call. Every `claude -p` invocation re-sends a large system
+# prompt, so per-call overhead dominates cost — batching is what keeps scoring
+# inside the monthly budget rather than an optimization. See DECISIONS.md D5.
+SCORE_BATCH_SIZE = 10
+
+
+def _score_system_prompt(profile: dict) -> str:
+    return SCORE_PROMPT_TEMPLATE.format(
+        candidate_summary=_build_candidate_summary(profile),
+        candidate_location=_candidate_location(profile),
+    )
+
+
+def _job_block(job: dict) -> str:
+    """Render one job for the scoring prompt (title + truncated description)."""
+    return (
+        f"TITLE: {job['title']}\n"
+        f"COMPANY: {job.get('site') or 'unknown'}\n"
+        f"LOCATION: {job.get('location') or 'N/A'}\n\n"
+        f"DESCRIPTION:\n{(job.get('full_description') or '')[:SCORE_DESC_CHARS]}"
+    )
+
+
+_BATCH_INSTRUCTIONS = """
+You are scoring MULTIPLE job postings in one pass. Each posting below is
+introduced by a line of the form `### JOB <n>`.
+
+Emit one block per posting, in the same order, each starting with its own
+`### JOB <n>` line followed by the four required lines:
+
+### JOB 1
+ELIGIBILITY: ...
+SCORE: ...
+KEYWORDS: ...
+REASONING: ...
+
+### JOB 2
+...
+
+Score every posting independently. Do not merge, skip, or reorder them.
+"""
+
+
+def score_jobs_batch(resume_text: str, jobs: list[dict],
+                     profile: dict | None = None) -> list[dict]:
+    """Score several jobs in a single LLM call.
+
+    Returns one result dict per input job, in order. Any job the model skips or
+    mangles comes back with score=None and an error, so the caller's existing
+    retry/backoff path picks it up on the next run — a malformed batch degrades
+    a few jobs, never the whole run.
+    """
+    if profile is None:
+        profile = load_profile()
+    if not jobs:
+        return []
+    if len(jobs) == 1:
+        return [score_job(resume_text, jobs[0], profile)]
+
+    # Rule-based pre-filter first; ineligible jobs never reach the model.
+    results: list[dict | None] = [None] * len(jobs)
+    to_score: list[tuple[int, dict]] = []
+    for i, job in enumerate(jobs):
+        reason = _check_ineligible(job)
+        if reason:
+            log.info("Pre-filter INELIGIBLE (non_us_only): %s — %s",
+                     (job.get("title") or "?")[:60], reason)
+            results[i] = {"score": 2, "keywords": "", "eligibility": "non_us_only",
+                          "reasoning": f"Ineligible: {reason}. Candidate is US-based."}
+        else:
+            to_score.append((i, job))
+
+    if not to_score:
+        return [r for r in results if r is not None]
+
+    try:
+        blocks = "\n\n".join(
+            f"### JOB {n}\n{_job_block(job)}" for n, (_, job) in enumerate(to_score, 1))
+        messages = [
+            {"role": "system", "content": _score_system_prompt(profile) + _BATCH_INSTRUCTIONS},
+            {"role": "user",
+             "content": f"RESUME:\n{resume_text}\n\n---\n\nJOB POSTINGS:\n{blocks}"},
+        ]
+        client = get_client()
+        response = client.chat(messages, max_tokens=8192, temperature=0.2)
+        parsed = _split_batch_response(response, len(to_score))
+    except Exception as e:
+        log.error("LLM error scoring batch of %d: %s", len(to_score), e)
+        parsed = [None] * len(to_score)
+
+    for (idx, job), block in zip(to_score, parsed):
+        if block is None:
+            results[idx] = {"score": None, "keywords": "", "reasoning": "",
+                            "eligibility": None,
+                            "error": "batch scoring returned no block for this job"}
+        else:
+            results[idx] = _parse_score_response(block)
+
+    return [r for r in results if r is not None]
+
+
+def _split_batch_response(response: str, expected: int) -> list[str | None]:
+    """Split a batched response into per-job blocks, indexed by JOB number."""
+    blocks: list[str | None] = [None] * expected
+    chunks = re.split(r"^\s*#{0,3}\s*JOB\s+(\d+)\s*$", response, flags=re.MULTILINE)
+    # re.split with one capture group yields [pre, n1, body1, n2, body2, ...]
+    for n_str, body in zip(chunks[1::2], chunks[2::2]):
+        try:
+            n = int(n_str)
+        except ValueError:
+            continue
+        if 1 <= n <= expected:
+            blocks[n - 1] = body
+    missing = sum(1 for b in blocks if b is None)
+    if missing:
+        log.warning("Batch response missing %d/%d job blocks", missing, expected)
+    return blocks
 
 
 def score_job(resume_text: str, job: dict, profile: dict | None = None) -> dict:
@@ -292,19 +431,10 @@ def score_job(resume_text: str, job: dict, profile: dict | None = None) -> dict:
         }
 
     try:
-        candidate_summary = _build_candidate_summary(profile)
-        score_prompt = SCORE_PROMPT_TEMPLATE.format(candidate_summary=candidate_summary)
-
-        job_text = (
-            f"TITLE: {job['title']}\n"
-            f"COMPANY: {job['site']}\n"
-            f"LOCATION: {job.get('location', 'N/A')}\n\n"
-            f"DESCRIPTION:\n{(job.get('full_description') or '')[:6000]}"
-        )
-
         messages = [
-            {"role": "system", "content": score_prompt},
-            {"role": "user", "content": f"RESUME:\n{resume_text}\n\n---\n\nJOB POSTING:\n{job_text}"},
+            {"role": "system", "content": _score_system_prompt(profile)},
+            {"role": "user",
+             "content": f"RESUME:\n{resume_text}\n\n---\n\nJOB POSTING:\n{_job_block(job)}"},
         ]
 
         client = get_client()
@@ -455,7 +585,24 @@ def run_scoring(limit: int = 0, rescore: bool = False, workers: int = 1,
         log.info("Committed batch of %d scores to DB (%d/%d total)", len(batch), completed, len(jobs))
         return []
 
-    if workers > 1:
+    if workers <= 1 and SCORE_BATCH_SIZE > 1:
+        # Batched path: one LLM call per SCORE_BATCH_SIZE jobs.
+        for start in range(0, len(jobs), SCORE_BATCH_SIZE):
+            chunk = jobs[start:start + SCORE_BATCH_SIZE]
+            results = score_jobs_batch(resume_text, chunk)
+            for job, result in zip(chunk, results):
+                result["url"] = job["url"]
+                completed += 1
+                if result["score"] is None:
+                    errors += 1
+                batch.append(result)
+                log.info("[%d/%d] score=%s  %s", completed, len(jobs),
+                         result["score"], (job.get("title") or "?")[:60])
+            if len(batch) >= batch_size:
+                batch = _flush_and_log(batch, completed)
+        if batch:
+            batch = _flush_and_log(batch, completed)
+    elif workers > 1:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(_score_one, job): job for job in jobs}
             for future in as_completed(futures):
