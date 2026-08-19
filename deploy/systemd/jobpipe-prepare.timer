@@ -1,0 +1,12 @@
+[Unit]
+Description=ApplyPilot prepare run, Mon/Wed/Fri early morning
+
+[Timer]
+OnCalendar=Mon,Wed,Fri 06:00
+# The machine is a laptop and will miss timers while asleep. Catch up rather
+# than skip the week.
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

@@ -14,7 +14,7 @@ first, then `ARCHITECTURE.md` for the design and `DECISIONS.md` for why.
 (`acquire_job(require_gate=True)`), not by convention. Submission is manual:
 `applypilot apply` after the gate clears a batch.
 
-**Tests: 531 passed, 3 skipped.**
+**Tests: 544 passed, 3 skipped.**
 ```bash
 .venv/bin/python -m pytest -q tests --ignore=tests/test_extension_server.py
 ```
@@ -50,37 +50,38 @@ safe by construction (D16) but means the real fill rate is unknown.
 ## Next up
 
 1. **Verify the Workday selector map against a live form.** Everything else in
-   the filler is done. Open any Workday application in the discovery browser,
-   run the generated script by hand, and record which of the eight selectors
-   match. Then set `last_verified` and `verified_against` in
-   `src/applypilot/apply/selector_maps/workday.yaml`. This is the single step
-   that turns the filler from plumbing into a measured win.
+   the filler is built and tested. Open any Workday application in the
+   discovery browser, run the generated script by hand, record which of the
+   eight selectors match, then set `last_verified` and `verified_against` in
+   `src/applypilot/apply/selector_maps/workday.yaml`. This is the one step that
+   turns the filler from plumbing into a measured win, and it unblocks the
+   `ats-form-fill` skill.
 2. **Map Paylocity.** Nine rows, and it is the ATS of the only successful
-   submission this system has made, so a working path through it already
-   exists. No map file yet.
-3. **Gmail — resolve the OTP blocker.** ARCHITECTURE §6 chose browser-session
-   scraping because the OAuth console setup kept stalling. That premise may be
-   obsolete: `googleworkspace/cli` (skills.sh, 71K installs, official Google
-   source) offers `gws auth login` — interactive browser OAuth with **no Google
-   Cloud project setup**. Test it before building the scraper; a real API beats
-   reading markup. If it works, §6 needs rewriting and a D19 recording the
-   change.
-4. **Finish M9.** systemd user timers (prepare Mon/Wed/Fri, which now cannot
-   submit even by accident; OTP poller), plain-text run reports, per-stage
-   JSONL logs in `logs/`.
+   submission this system has made. No map exists: unlike Workday's
+   `data-automation-id` convention or Greenhouse's long-stable field ids, I have
+   no real knowledge of Paylocity's markup, and inventing selectors would add
+   noise rather than coverage. Needs one look at a live form.
+3. **Gmail — resolve the OTP blocker.** §6 chose browser-session scraping
+   because the OAuth console setup kept stalling. That premise may be obsolete:
+   `googleworkspace/cli` (skills.sh, 71K installs, official Google source) has
+   `gws auth login` — interactive browser OAuth with **no Google Cloud project
+   setup**. Test it before building a scraper; a real API beats reading markup.
+   If it works, §6 needs rewriting and a D23 recording the change.
+4. **Two live cover letters currently fail validation.** Both predate the
+   150–200 word target so the length errors are expected, but one also claims
+   the employer has "100+ offices nationwide" — a number that appears nowhere
+   in that job description. Regenerate both:
+   `applypilot run cover` after clearing `cover_letter_path` for those rows.
 5. **Discovery: read the rendered page** instead of the `_next/data` route
    (§3). Needs a live logged-in session to check whether the rendered page
    carries description text — if it does, enrich drops back to a fallback.
-6. **hiring.cafe apply-marking click** (§3), keyed off `submission_proof`, never
-   off a park or a failure.
-7. **Fabricated-metric check** (§4, §13.6): extract every numeral from a cover
-   letter and require it to appear in `resume_facts.real_metrics` or the job
-   description. Pure Python, no LLM. Not started.
-8. **Author the three skills** (§11) — `ats-form-fill`, `cover-letter-review`,
-   `gate-triage`. Deferred until the filler maps are verified; a skill encoding
-   a design that is mid-change is worse than none.
-
----
+6. **hiring.cafe apply-marking click** (§3), keyed off `submission_proof`,
+   never off a park or a failure.
+7. **Scoring calibration** (§4): read 20 of the 117 sub-threshold jobs and
+   decide whether the scorer is right. Do not tune the prompt on intuition.
+8. **Dual state truth** (§13.2): migrate reads off `apply_status` /
+   `apply_category` / `tracking_status` onto `jobs.state`, then writes, then
+   drop. Worth doing before 50/week.
 
 ## Blocked
 
@@ -99,16 +100,22 @@ safe by construction (D16) but means the real fill rate is unknown.
 
 ## Recently finished
 
-- **Architecture v2 adopted.** `ARCHITECTURE.md` at the repo root, the standing
-  rule in force, D14–D18 recorded.
-- **Deterministic filler built** (§5): `apply/form_fill.py` plus three selector
-  maps, wired additively into the apply prompt. An unmapped ATS produces an
-  empty block and falls straight through to the existing agent path.
-- **`detect_ats` gaps closed** (D17). UNKNOWN went from 101 rows (44%) to 62
-  (27%) with eleven dict entries. This is what revealed that Workday, not
-  Greenhouse, is the family worth mapping first.
-- **§12 audit run** (report only, no changes): enrichment already tiers
-  JSON-LD → deterministic selectors → LLM, so the suspected waste there does
-  not exist. The real waste is the apply stage, which the filler now addresses.
-- **Review gate wired end to end** (previous session): the gate is binding, not
-  advisory. Three real defects found and fixed in the process.
+- **M9 complete.** `reports.py` — per-stage JSONL (`logs/<stage>.jsonl`) plus
+  `applypilot report`, written automatically at the end of every run. systemd
+  units in `deploy/systemd/`, validated with `systemd-analyze verify`, **not
+  enabled** (D21). The apply stage now stamps `fill_path` on every attempt,
+  which is what makes the filler measurable.
+- **Fabricated-quantity check** (D19). Closed the known gap in §4. Caught a real
+  invented claim on its first run against live output.
+- **Two skills authored** (D22): `cover-letter-review` (wraps the pipeline's own
+  validator, so its verdict cannot drift) and `gate-triage` (taxonomy,
+  thresholds, five invariants). `ats-form-fill` deliberately deferred until the
+  maps are verified.
+- **Deterministic filler built** (§5, D15–D18): `apply/form_fill.py` plus three
+  selector maps, wired additively into the apply prompt. Unmapped ATS families
+  fall straight through to the existing agent path.
+- **`detect_ats` gaps closed** (D17). UNKNOWN 101 rows (44%) → 62 (27%), which
+  is what revealed Workday rather than Greenhouse as the family worth mapping
+  first.
+- **Architecture v2 adopted** (D14) with the standing rule in force.
+- **Review gate wired end to end** (previous session): binding, not advisory.

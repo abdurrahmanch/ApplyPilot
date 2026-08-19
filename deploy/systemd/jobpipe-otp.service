@@ -1,0 +1,9 @@
+[Unit]
+Description=ApplyPilot OTP poller (files emailed verification codes for apply workers)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/abdurrahman/Documents/Repositories/ApplyPilot/.venv/bin/applypilot otp --once
+TimeoutStartSec=5m
+Nice=10

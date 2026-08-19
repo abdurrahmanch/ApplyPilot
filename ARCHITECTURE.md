@@ -123,10 +123,17 @@ drafts go to a `_rejected.txt` sidecar and the job parks as `cover_failed`.
 Stem-based error-tier regexes, structural paragraph check, batch-level sameness
 check.
 
-**Known gap:** the validator pins tools but not numbers. A fabricated metric
-("12B+ workflows/month") passes. Practical mitigation: extract every numeral and
-quantity from the letter and require each to appear in `resume_facts` or the job
-description — a pure-Python check, no LLM.
+**Fabricated quantities — closed.** `validator.find_unsupported_numbers`
+extracts every quantity from the letter and from the allowed sources (resume,
+job description, `resume_facts.real_metrics`), and compares them at the same
+scale, so "12B" is not satisfied by an unrelated "12". Error tier, forcing
+regeneration. Pure Python, no LLM.
+
+The tuning that matters is what it *doesn't* fire on: years, and bare integers
+under three digits. A check that flags "2026" or "three teams" forces endless
+regeneration and gets switched off. Verified on real output — it caught a
+letter claiming the employer had "100+ offices nationwide", a number that
+appears nowhere in that job description.
 
 ---
 
@@ -329,6 +336,13 @@ Track instead:
 Keep the scoring cost measurement (`$0.0063/job` batched) as the one place the
 notional figure is still useful — it justifies keeping batching.
 
+**Implemented** in `src/applypilot/reports.py`. `logs/<stage>.jsonl` is the
+truth, one line per event; `applypilot report` is the ten-second read. Every
+`applypilot run` writes a report at the end. The apply stage records
+`fill_path` (`deterministic` when the ATS has a selector map, `agent`
+otherwise) on every attempt, which is the before/after comparison §5 asks for
+— it needs real applications before it says anything.
+
 ---
 
 ## 10. Subagents
@@ -372,12 +386,16 @@ profile and this ATS mix.
 
 **Skills to author:**
 
-1. **`ats-form-fill`** — the selector maps as resources, the fill pass and
-   coverage check as code. The highest-value skill in the project.
-2. **`cover-letter-review`** — the banned-phrase, structural, and
-   fabricated-number checks as a script.
-3. **`gate-triage`** — the escalation taxonomy encoded, so gate behaviour is
-   consistent across sessions.
+1. **`ats-form-fill`** — **deferred, deliberately.** The selector maps are all
+   `status: unverified`; a skill encoding them would teach a design that is
+   about to change. Author it once the Workday map is verified against a live
+   form. The code it would wrap already exists at `apply/form_fill.py`.
+2. **`cover-letter-review`** — **done**, at `.claude/skills/cover-letter-review`.
+   Wraps the pipeline's own validator, so its verdict is identical to what
+   shipping would decide. Found a fabricated "100+ offices nationwide" in a
+   live letter on its first run.
+3. **`gate-triage`** — **done**, at `.claude/skills/gate-triage`. The taxonomy,
+   the four auto-answer conditions, and the five invariants.
 
 **User-supplied skills:** the operator is adding skills of his own (confirmed
 2026-08-19: `ponytail` — a code-writing skill enforcing minimal solutions — plus
@@ -444,7 +462,10 @@ Known suspects beyond the form filler:
 7. Establish the three continuity files and the standing rule (§8).
 8. Author skills (§11).
 9. Finish M9: systemd timers (prepare Mon/Wed/Fri, never submits; OTP poller),
-   plain-text run reports, per-stage JSONL logs.
+   plain-text run reports, per-stage JSONL logs. **Done** — units in
+   `deploy/systemd/` (validated, not enabled; enabling a recurring job that
+   spends subscription quota is the operator's call), reports and JSONL in
+   `reports.py`.
 
 Scoring calibration (§4) and the parallel-worker question (§5) stay open,
 pending measurement. Don't touch either until there's data.

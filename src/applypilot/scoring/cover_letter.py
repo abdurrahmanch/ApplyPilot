@@ -176,7 +176,15 @@ def generate_cover_letter(
         letter = client.chat(messages, max_tokens=8192, temperature=0.7)
         letter = sanitize_text(letter)  # auto-fix em dashes, smart quotes
 
-        validation = validate_cover_letter(letter)
+        # Every number the letter is allowed to use has to come from
+        # somewhere real: the resume, the posting, or the pinned metrics.
+        # Anything else was invented (ARCHITECTURE §4).
+        fact_sources = [
+            resume_text,
+            job.get("full_description") or job.get("description") or "",
+            " ".join(profile.get("resume_facts", {}).get("real_metrics", []) or []),
+        ]
+        validation = validate_cover_letter(letter, fact_sources=fact_sources)
         if validation["passed"]:
             return letter, validation
 

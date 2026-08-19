@@ -384,3 +384,54 @@ script. The script goes through the native value setter and dispatches
 `input`/`change`, or React reverts every write on its next render.
 **Rejected:** a per-field instruction list (still N round trips); reimplementing
 DOM control outside the agent (rebuilds what exists).
+
+### D19 — Fabricated quantities are an error, and the tuning is in what it ignores  (2026-08-19)
+**Decision:** `validator.find_unsupported_numbers` extracts quantities from the
+letter and from the allowed sources with the same regex, then compares keys that
+carry the scale. Error tier. Years and bare integers under three digits are
+never treated as claims.
+**Why:** ARCHITECTURE §4 named this as the known gap. The hard part turned out
+not to be catching inventions but avoiding false positives — a check that flags
+"2026" or "three teams" forces regeneration forever and gets switched off. Two
+real bugs surfaced while building it: overlapping regexes reported the same
+number twice, and substring comparison let an unrelated "12 services" in the job
+description license a claim of "12B".
+**Verified:** on real output. A live letter claimed the employer had "100+
+offices nationwide"; that number appears nowhere in the job description.
+**Rejected:** an LLM judge for numbers — it is a lookup, and §0.1 says a
+reasoning step in a hot path is a bug until proven otherwise.
+
+### D20 — Run reports and JSONL, with no cost figure in them  (2026-08-19)
+**Decision:** `reports.py`. `logs/<stage>.jsonl` is one line per event and the
+source of truth; `applypilot report` renders the summary; every `applypilot run`
+writes one at the end. The apply stage stamps `fill_path` (`deterministic` when
+the ATS has a selector map, `agent` otherwise) on every attempt.
+**Why:** §9 asks for wall clock by fill path, agent fallback rate, per-ATS
+success, and gate items against the ~20 budget. `fill_path` is what makes the
+filler's before/after measurable at all.
+**Rejected:** putting notional API cost in the report. There is no API key on
+this install, so the number would measure nothing and would get quoted as if it
+were money — which is exactly how "$87/week" entered the project notes.
+**Note:** per-ATS health reuses `pacing.ats_health`'s own `unhealthy` verdict
+rather than re-deriving the 50% threshold, so there is one definition of the
+rule instead of two free to drift.
+
+### D21 — Timers are written and validated, but not enabled  (2026-08-19)
+**Decision:** `deploy/systemd/` holds both units plus an installer.
+`systemd-analyze verify` passes. Nothing is installed or enabled.
+**Why:** the prepare timer cannot submit — it ends at the gate stage, and
+submission separately requires an approved batch — so the risk is not bad
+applications. It is that a recurring job spends subscription quota on a schedule
+the operator did not choose to start. That is his call, and it is one command.
+**Rejected:** enabling `jobpipe-otp.timer` as well. It fails every 15 minutes
+until Gmail auth exists; the installer leaves it off and says so.
+
+### D22 — Two skills authored, one deliberately deferred  (2026-08-19)
+**Decision:** `cover-letter-review` and `gate-triage` ship in `.claude/skills/`.
+`ats-form-fill` does not.
+**Why:** §11 says a skill encoding a mid-change design is worse than none. The
+selector maps are all `status: unverified`, so `ats-form-fill` would teach a
+design about to change. The other two wrap settled behaviour — the validator and
+the escalation taxonomy — and `cover-letter-review` calls the pipeline's own
+validator rather than reimplementing the rules, so its verdict cannot drift from
+what shipping actually decides.

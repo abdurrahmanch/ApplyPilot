@@ -1,0 +1,13 @@
+[Unit]
+Description=ApplyPilot prepare run (discover through gate, never submits)
+Documentation=file:///home/abdurrahman/Documents/Repositories/ApplyPilot/ARCHITECTURE.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+# The run ends at the gate stage by design, and submission additionally
+# requires an approved batch (acquire_job(require_gate=True)). Two independent
+# reasons this unit cannot submit an application.
+ExecStart=/home/abdurrahman/Documents/Repositories/ApplyPilot/.venv/bin/applypilot run
+TimeoutStartSec=4h
+Nice=10

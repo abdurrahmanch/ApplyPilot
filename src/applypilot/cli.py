@@ -364,6 +364,24 @@ def apply(
 
 
 @app.command()
+def report(
+    save: bool = typer.Option(False, "--save", help="Also write the report to logs/."),
+) -> None:
+    """Print a plain-text run report: funnel, gate budget, ATS health, timings."""
+    _bootstrap()
+
+    from applypilot.database import get_connection
+    from applypilot.reports import build_report, write_report
+
+    conn = get_connection()
+    console.print(build_report(conn))
+    if save:
+        path = write_report(conn)
+        if path:
+            console.print(f"[dim]Saved to {path}[/dim]")
+
+
+@app.command()
 def status() -> None:
     """Show pipeline statistics from the database."""
     _bootstrap()

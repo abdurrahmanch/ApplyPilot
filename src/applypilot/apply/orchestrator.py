@@ -221,6 +221,22 @@ def _record_submission_proof(job: dict, outcome: str, ats_slug: str | None,
     """
     if dry_run:
         return
+
+    # One JSONL line per attempt (ARCHITECTURE §9). `fill_path` is what makes
+    # the deterministic-filler work measurable: an ATS with a selector map took
+    # the fast lane, one without it did not, and the median of each is the
+    # before/after comparison §5 asks for.
+    try:
+        from applypilot.apply.form_fill import load_map
+        from applypilot.reports import emit
+        emit("apply", "application",
+             url=job.get("url"), ats=ats_slug, outcome=outcome,
+             seconds=round(duration_ms / 1000.0, 1) if duration_ms else None,
+             fill_path="deterministic" if load_map(ats_slug) else "agent",
+             worker=worker_id)
+    except Exception as e:
+        logger.debug("Could not log the apply event: %s", e)
+
     try:
         from applypilot.apply.pacing import record_proof
         from applypilot.database import get_connection

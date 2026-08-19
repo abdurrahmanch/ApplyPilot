@@ -717,9 +717,27 @@ def _run_sequential(
         if status not in ("ok", "partial"):
             errors[name] = status
 
+        from applypilot.reports import emit
+        detail = {k: v for k, v in (result or {}).items()
+                  if k != "status" and isinstance(v, (int, float, str))
+                  } if isinstance(result, dict) else {}
+        emit("pipeline", "stage", name=name, status=status,
+             seconds=round(elapsed, 1), **detail)
+
         console.print(f"\n  Stage '{name}' completed in {elapsed:.1f}s — {status}")
 
     total_elapsed = time.time() - pipeline_start
+
+    # Every run ends with a report. The JSONL is the truth; this is the ten
+    # seconds of reading that tells him whether to look at it (ARCHITECTURE §9).
+    try:
+        from applypilot.reports import write_report
+        path = write_report(get_connection(), "end of run")
+        if path:
+            console.print(f"\n  [dim]Run report: {path}[/dim]")
+    except Exception as e:
+        log.warning("Could not write the run report: %s", e)
+
     return {"stages": results, "errors": errors, "elapsed": total_elapsed}
 
 

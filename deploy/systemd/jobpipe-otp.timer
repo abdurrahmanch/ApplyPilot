@@ -1,0 +1,13 @@
+[Unit]
+Description=ApplyPilot OTP poll
+
+[Timer]
+# Every 15 minutes is the resting cadence. During an apply run, poll faster by
+# running `applypilot otp --interval 60` in a terminal instead; codes expire in
+# about ten minutes and a 15-minute timer will miss them.
+OnBootSec=5m
+OnUnitActiveSec=15m
+Persistent=false
+
+[Install]
+WantedBy=timers.target

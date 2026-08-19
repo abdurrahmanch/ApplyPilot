@@ -346,11 +346,85 @@ def validate_tailored_resume(text: str, profile: dict, original_text: str = "") 
 
 # ── Cover Letter Validation ──────────────────────────────────────────────
 
-def validate_cover_letter(text: str) -> dict:
+# ---------------------------------------------------------------------------
+# Fabricated quantities (ARCHITECTURE §4, §13.6)
+# ---------------------------------------------------------------------------
+#
+# The allowlist pins tools and company names, so a letter cannot invent a
+# framework. It has never pinned *numbers*, so a letter claiming "12B+
+# workflows/month" sails through. That is the more damaging fabrication: a
+# reviewer who checks it finds a lie with the candidate's name on it.
+#
+# The check is pure Python. It flags a quantity only when the number is making
+# a claim, because most numerals in a letter are structural ("three years",
+# "2026") and flagging those would force endless regeneration over nothing.
+
+# A number is treated as a claim if it carries a scale marker or is large.
+_CLAIM_RE = re.compile(
+    r"(?<![\w.])(\d[\d,]*(?:\.\d+)?)\s*"
+    r"(%|K\b|M\b|B\b|bn\b|billion|million|thousand|x\b|\+)",
+    re.IGNORECASE)
+# Bare numbers need three digits before they read as a claim rather than as
+# "three teams" or "5 in total".
+_BARE_RE = re.compile(r"(?<![\w.$])(\d[\d,]{2,}(?:\.\d+)?)(?![\w])")
+
+_SCALE_ALIASES = {"bn": "b", "billion": "b", "million": "m", "thousand": "k"}
+
+
+def _quantities(text: str) -> list[tuple[str, str]]:
+    """Every quantity in `text` as (comparison key, what the reader sees).
+
+    The key carries the scale, so "12B" and a stray "12" elsewhere are not the
+    same claim — that distinction is the whole point. Claim matches consume
+    their span so the bare pass cannot report the same number twice.
+    """
+    found: list[tuple[str, str]] = []
+    spans: list[tuple[int, int]] = []
+
+    for m in _CLAIM_RE.finditer(text or ""):
+        core = m.group(1).replace(",", "")
+        scale = m.group(2).lower()
+        found.append((core + _SCALE_ALIASES.get(scale, scale), m.group(0).strip()))
+        spans.append(m.span())
+
+    for m in _BARE_RE.finditer(text or ""):
+        if any(a <= m.start() < b for a, b in spans):
+            continue
+        raw = m.group(1)
+        if raw.isdigit() and 1900 <= int(raw) <= 2100:
+            continue  # a year is a date, not a claim
+        found.append((raw.replace(",", ""), raw))
+
+    return found
+
+
+def find_unsupported_numbers(text: str, sources: list[str]) -> list[str]:
+    """Quantities in `text` that no source backs up.
+
+    `sources` is everything the letter may draw numbers from — the job
+    description, the resume, and `resume_facts.real_metrics`. Both sides are
+    extracted the same way and compared exactly, so a number is supported only
+    when the source states that same quantity at that same scale.
+    """
+    supported = {key for key, _ in _quantities(" ".join(s or "" for s in sources))}
+    out, seen = [], set()
+    for key, display in _quantities(text):
+        if key in supported or display in seen:
+            continue
+        seen.add(display)
+        out.append(display)
+    return out
+
+
+def validate_cover_letter(text: str, fact_sources: list[str] | None = None) -> dict:
     """Programmatic validation of a cover letter.
 
     Args:
         text: The cover letter text to validate.
+        fact_sources: Everything the letter may draw quantities from — the job
+            description, the resume, `resume_facts.real_metrics`. Omit to skip
+            the fabricated-number check; callers that have the sources should
+            always pass them.
 
     Returns:
         {"passed": bool, "errors": list[str]}
@@ -390,6 +464,16 @@ def validate_cover_letter(text: str) -> dict:
         errors.append(f"Too short ({words} words). Target 150-200; minimum 130.")
     elif words < 150:
         warnings.append(f"Slightly short ({words} words, target 150-200) — passes but flagged.")
+
+    # 3b. Invented quantities (ARCHITECTURE §4). Error tier: a fabricated
+    # metric is the one failure mode that damages the candidate rather than
+    # just reading badly, so it forces a regeneration.
+    if fact_sources:
+        invented = find_unsupported_numbers(text, fact_sources)
+        if invented:
+            errors.append(
+                "Unsupported quantities (not in the resume, the job "
+                f"description, or resume_facts): {', '.join(invented[:5])}")
 
     # 4. LLM self-talk
     found_leaks = [p for p in LLM_LEAK_PHRASES if p in text_lower]
