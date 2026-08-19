@@ -55,3 +55,4 @@ Thumbs.db
 .claude/
 # CLAUDE.md is machine/user-specific — copy CLAUDE.md.example to customize
 CLAUDE.md
+.venv/

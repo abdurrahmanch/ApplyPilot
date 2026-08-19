@@ -153,17 +153,75 @@ class TestBuildFallbackChain(unittest.TestCase):
         names = self._build(quality=False)
         self.assertGreater(len(names), 0, "Should have at least one model when keys are set")
 
-    def test_raises_without_api_keys(self):
-        """RuntimeError is raised when no API keys are configured."""
-        env_without_keys = {
+    @staticmethod
+    def _env_without_keys():
+        return {
             k: v for k, v in __import__("os").environ.items()
             if k not in ("GEMINI_API_KEY", "OPENAI_API_KEY",
-                         "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "LLM_URL")
+                         "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "LLM_URL",
+                         "CLAUDE_CLI_MODEL", "CLAUDE_CLI_MODEL_QUALITY")
         }
-        with patch.dict("os.environ", env_without_keys, clear=True):
+
+    def test_raises_without_api_keys_or_cli(self):
+        """RuntimeError is raised when there is no API key and no claude CLI."""
+        with patch.dict("os.environ", self._env_without_keys(), clear=True):
             from applypilot.llm import _build_fallback_chain
-            with self.assertRaises(RuntimeError):
+            with (patch("applypilot.llm.claude_cli_available", return_value=False),
+                  self.assertRaises(RuntimeError)):
                 _build_fallback_chain("gemini-2.5-flash", quality=False)
+
+    def test_falls_back_to_claude_cli_without_api_keys(self):
+        """With no API keys but the CLI present, the chain is CLI-backed."""
+        with patch.dict("os.environ", self._env_without_keys(), clear=True):
+            from applypilot.llm import _build_fallback_chain
+            with patch("applypilot.llm.claude_cli_available", return_value=True):
+                fast = _build_fallback_chain("gemini-2.5-flash", quality=False)
+                quality = _build_fallback_chain("gemini-2.5-pro", quality=True)
+
+        self.assertEqual([e.provider for e in fast], ["claude_cli"])
+        self.assertEqual([e.name for e in fast], ["haiku"])
+        # Quality tier leads with the stronger model, then degrades to fast.
+        self.assertEqual([e.name for e in quality], ["sonnet", "haiku"])
+        self.assertTrue(all(e.provider == "claude_cli" for e in quality))
+
+    def test_claude_cli_models_are_env_overridable(self):
+        env = self._env_without_keys()
+        env["CLAUDE_CLI_MODEL"] = "opus"
+        env["CLAUDE_CLI_MODEL_QUALITY"] = "opus"
+        with patch.dict("os.environ", env, clear=True):
+            from applypilot.llm import _build_fallback_chain
+            with patch("applypilot.llm.claude_cli_available", return_value=True):
+                chain = _build_fallback_chain("ignored", quality=True)
+        # Identical fast/quality models collapse to a single entry.
+        self.assertEqual([e.name for e in chain], ["opus"])
+
+
+class TestFlattenMessages(unittest.TestCase):
+    """`claude -p` takes one prompt, so chat messages get flattened."""
+
+    def test_single_user_message_passes_through(self):
+        from applypilot.llm import _flatten_messages
+        self.assertEqual(
+            _flatten_messages([{"role": "user", "content": "Score this job."}]),
+            "Score this job.",
+        )
+
+    def test_system_is_hoisted_above_user(self):
+        from applypilot.llm import _flatten_messages
+        out = _flatten_messages([
+            {"role": "system", "content": "You are terse."},
+            {"role": "user", "content": "Capital of France?"},
+        ])
+        self.assertEqual(out, "You are terse.\n\nCapital of France?")
+
+    def test_multi_turn_history_is_labelled(self):
+        from applypilot.llm import _flatten_messages
+        out = _flatten_messages([
+            {"role": "user", "content": "First"},
+            {"role": "assistant", "content": "Second"},
+            {"role": "user", "content": "Third"},
+        ])
+        self.assertEqual(out, "User:\nFirst\n\nAssistant:\nSecond\n\nUser:\nThird")
 
 
 if __name__ == "__main__":

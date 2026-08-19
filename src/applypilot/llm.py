@@ -16,8 +16,12 @@ next model in the fallback chain — including cross-provider fallback to
 OpenAI and Anthropic if their API keys are configured.
 """
 
+import json
 import logging
 import os
+import shutil
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 
@@ -36,6 +40,58 @@ class ModelEntry:
     provider: str           # "gemini", "openai", "anthropic", "local"
     base_url: str
     api_key: str
+
+
+# ---------------------------------------------------------------------------
+# Claude Code CLI provider
+#
+# Arch's deployment has no Anthropic API key: every LLM stage runs through the
+# locally installed `claude` binary, which authenticates via his existing
+# subscription. See DECISIONS.md D1.
+# ---------------------------------------------------------------------------
+
+CLAUDE_CLI_FAST_DEFAULT = "haiku"
+CLAUDE_CLI_QUALITY_DEFAULT = "sonnet"
+
+# Wall-clock ceiling for one `claude -p` invocation. Generous: batch scoring
+# calls carry many jobs per prompt and runtime is explicitly not a constraint.
+_CLI_TIMEOUT = 900
+
+
+def claude_cli_available() -> bool:
+    """True when the `claude` binary is on PATH."""
+    return shutil.which("claude") is not None
+
+
+def _claude_cli_chain(quality: bool = False) -> list[ModelEntry]:
+    """Build the CLI-backed chain. Quality tier degrades to the fast model."""
+    fast = os.environ.get("CLAUDE_CLI_MODEL", CLAUDE_CLI_FAST_DEFAULT)
+    strong = os.environ.get("CLAUDE_CLI_MODEL_QUALITY", CLAUDE_CLI_QUALITY_DEFAULT)
+    models = [strong, fast] if quality else [fast]
+    # dict.fromkeys dedupes while preserving order (fast == strong is legal)
+    return [ModelEntry(m, "claude_cli", "", "") for m in dict.fromkeys(models)]
+
+
+def _flatten_messages(messages: list[dict]) -> str:
+    """Collapse a chat-style message list into one prompt string.
+
+    `claude -p` takes a single prompt, so system messages are hoisted into a
+    leading block and any multi-turn history is rendered as labelled sections.
+    A lone user message passes through untouched.
+    """
+    system = [m["content"] for m in messages if m.get("role") == "system"]
+    rest = [m for m in messages if m.get("role") != "system"]
+
+    parts: list[str] = []
+    if system:
+        parts.append("\n\n".join(system))
+    if len(rest) == 1:
+        parts.append(rest[0]["content"])
+    else:
+        for m in rest:
+            label = "Assistant" if m.get("role") == "assistant" else "User"
+            parts.append(f"{label}:\n{m['content']}")
+    return "\n\n".join(parts).strip()
 
 
 def _build_fallback_chain(primary_model: str, quality: bool = False) -> list[ModelEntry]:
@@ -117,11 +173,17 @@ def _build_fallback_chain(primary_model: str, quality: bool = False) -> list[Mod
         for m in anthropic_models:
             chain.append(ModelEntry(m, "anthropic", anthropic_url, anthropic_key))
 
-    # If nothing was added (no keys), raise
+    # No API keys anywhere -> fall back to the local Claude Code CLI, which
+    # authenticates through the user's existing Claude subscription.
+    if not chain and claude_cli_available():
+        chain = _claude_cli_chain(quality=quality)
+
+    # If nothing was added (no keys, no CLI), raise
     if not chain:
         raise RuntimeError(
             "No LLM provider configured. "
-            "Set GEMINI_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY, or ANTHROPIC_API_KEY."
+            "Set GEMINI_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY, or ANTHROPIC_API_KEY, "
+            "or install the Claude Code CLI (`claude`) and sign in."
         )
 
     return chain
@@ -163,9 +225,15 @@ def _detect_provider(quality: bool = False) -> tuple[str, str, str]:
             chosen_model or "local-model",
             os.environ.get("LLM_API_KEY", ""),
         )
+    if claude_cli_available():
+        default = (CLAUDE_CLI_QUALITY_DEFAULT if quality
+                   else CLAUDE_CLI_FAST_DEFAULT)
+        env_key = "CLAUDE_CLI_MODEL_QUALITY" if quality else "CLAUDE_CLI_MODEL"
+        return ("", os.environ.get(env_key, default), "")
     raise RuntimeError(
         "No LLM provider configured. "
-        "Set GEMINI_API_KEY, OPENAI_API_KEY, or LLM_URL."
+        "Set GEMINI_API_KEY, OPENAI_API_KEY, or LLM_URL, "
+        "or install the Claude Code CLI (`claude`) and sign in."
     )
 
 
@@ -234,10 +302,77 @@ class LLMClient:
                    temperature: float, max_tokens: int,
                    is_last: bool = False) -> str | None:
         """Try a single model entry. Dispatches to the right provider."""
-        if entry.provider == "anthropic":
+        if entry.provider == "claude_cli":
+            return self._try_claude_cli(entry, messages, is_last)
+        elif entry.provider == "anthropic":
             return self._try_anthropic(entry, messages, temperature, max_tokens, is_last)
         else:
             return self._try_openai_compat(entry, messages, temperature, max_tokens, is_last)
+
+    def _try_claude_cli(self, entry: ModelEntry, messages: list[dict],
+                        is_last: bool = False) -> str | None:
+        """Run one generation through the local `claude` binary.
+
+        Temperature and max_tokens have no CLI equivalent and are ignored.
+        The subprocess runs in an empty temp directory with MCP disabled so it
+        picks up no project CLAUDE.md, no MCP servers, and no repo context —
+        only the prompt we pass on stdin.
+        """
+        prompt = _flatten_messages(messages)
+
+        for attempt in range(_MAX_RETRIES):
+            try:
+                with tempfile.TemporaryDirectory(prefix="applypilot-llm-") as workdir:
+                    proc = subprocess.run(
+                        [
+                            "claude", "-p",
+                            "--model", entry.name,
+                            "--output-format", "json",
+                            "--strict-mcp-config",
+                            "--mcp-config", '{"mcpServers":{}}',
+                        ],
+                        input=prompt,
+                        capture_output=True,
+                        text=True,
+                        cwd=workdir,
+                        timeout=_CLI_TIMEOUT,
+                        check=False,
+                    )
+            except subprocess.TimeoutExpired:
+                log.warning("claude_cli/%s timed out after %ss (attempt %d/%d)",
+                            entry.name, _CLI_TIMEOUT, attempt + 1, _MAX_RETRIES)
+                continue
+
+            if proc.returncode != 0:
+                log.warning("claude_cli/%s exited %d: %.200s",
+                            entry.name, proc.returncode, proc.stderr)
+                if not is_last:
+                    return None
+                continue
+
+            try:
+                payload = json.loads(proc.stdout)
+            except json.JSONDecodeError:
+                log.warning("claude_cli/%s returned non-JSON: %.200s",
+                            entry.name, proc.stdout)
+                continue
+
+            if payload.get("is_error"):
+                log.warning("claude_cli/%s reported an error: %.200s",
+                            entry.name, str(payload.get("result", "")))
+                if not is_last:
+                    return None
+                continue
+
+            text = payload.get("result", "")
+            cost = payload.get("total_cost_usd")
+            if cost is not None:
+                log.info("claude_cli/%s cost $%.4f", entry.name, cost)
+            if text:
+                return text
+            log.warning("claude_cli/%s returned an empty result", entry.name)
+
+        return None
 
     def _try_openai_compat(self, entry: ModelEntry, messages: list[dict],
                            temperature: float, max_tokens: int,
