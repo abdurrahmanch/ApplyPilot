@@ -754,15 +754,31 @@ def otp(
     # and the TTL in otp.py is what actually keeps stale codes out.
     days = max(1, round(lookback / 24))
 
+    from applypilot.tracking import gmail_browser
+
+    # Prefer the browser session. It is the path that actually works today —
+    # the OAuth setup the MCP client needs has never been completed, and the
+    # Workday-heavy queue is blocked behind code retrieval (ARCHITECTURE §6).
+    use_browser = gmail_browser.available()
+    console.print(
+        "[dim]Reading Gmail from the signed-in browser profile.[/dim]"
+        if use_browser else
+        "[dim]No browser profile; falling back to the Gmail MCP client. "
+        "Run scripts/gmail_login.py to use a browser session instead.[/dim]")
+
     def poll_once() -> int:
         try:
-            emails = asyncio.run(
-                search_application_emails(days=days, limit=25)) or []
+            if use_browser:
+                emails = gmail_browser.fetch_otp_candidates(
+                    lookback_hours=lookback, limit=25)
+            else:
+                emails = asyncio.run(
+                    search_application_emails(days=days, limit=25)) or []
         except Exception as e:
             console.print(f"[red]Gmail search failed:[/red] {e}")
             return 0
         found = 0
-        for email in emails:
+        for email in emails or []:
             if process_email(conn, email):
                 found += 1
         return found

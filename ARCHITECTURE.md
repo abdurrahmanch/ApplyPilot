@@ -194,15 +194,33 @@ systems look for.
 
 ## 6. Email, OTP, and the Chrome extension question
 
-**Gmail via browser session, not OAuth.** Same pattern as discovery: a
-persistent logged-in profile, read the interface. This unblocks OTP retrieval
-today rather than after a console setup that has repeatedly stalled.
+**Gmail via browser session, not OAuth. Built and working** —
+`tracking/gmail_browser.py`, profile at `~/.applypilot/gmail-profile`,
+established once by `scripts/gmail_login.py`.
 
-Tradeoffs to hold in mind: browser reading is more fragile than the API
-(markup shifts, session expiry) and the OTP window is ~10 minutes. Failure mode
-is acceptable — the application parks, nothing breaks. If session expiry becomes
-routine, OAuth (read-only scope, desktop credential, Testing mode) is the
-upgrade path.
+Read-only by construction: nothing sends, deletes, or labels. `available()`
+gates every call on the Google auth cookie set actually being present, so a
+missing or expired login degrades to "no results" rather than launching a
+browser at nothing.
+
+Two shapes, deliberately: `fetch()` returns the OTP shape that
+`otp.process_email` consumes, and `search_application_emails` /
+`read_email_bodies` mirror the MCP client's signatures and dict shape so
+`run_tracking` cannot tell which source it read from. It prefers the browser
+and falls back to MCP.
+
+**Cost characteristic:** every call launches a headless Chromium (~10s) and
+each body read is one navigation. One context serves all three tracking
+queries — a launch per query turned a routine run into minutes. Bodies are
+still sequential; that is the next thing to fix if tracking gets slow, not the
+launch count.
+
+Tradeoffs: browser reading is more fragile than the API (markup shifts, session
+expiry) and the OTP window is ~10 minutes. Failure mode is acceptable — the
+application parks, nothing breaks. **The upgrade path is `gws auth login`**
+(`googleworkspace/cli`, browser OAuth with no Google Cloud project), which
+would let the existing API client work as-is. That is strictly better than more
+selectors if the markup starts churning.
 
 **OTP class stays pure-Python pattern matching**, placed before any LLM call.
 Classification of ambiguous/interview/offer mail is the only part that reasons.

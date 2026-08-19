@@ -14,7 +14,7 @@ first, then `ARCHITECTURE.md` for the design and `DECISIONS.md` for why.
 (`acquire_job(require_gate=True)`), not by convention. Submission is manual:
 `applypilot apply` after the gate clears a batch.
 
-**Tests: 544 passed, 3 skipped.**
+**Tests: 559 passed, 3 skipped.**
 ```bash
 .venv/bin/python -m pytest -q tests --ignore=tests/test_extension_server.py
 ```
@@ -47,12 +47,12 @@ safe by construction (D16) but means the real fill rate is unknown.
 
 ---
 
-## The dependency that gates everything
+## The dependency that gates everything — first link now built
 
 `myworkdayjobs.com` is on the manual-ATS skip list (`config/sites.yaml:11`,
 "requires account login, can't automate"). Workday is 24% of the queue, so a
-quarter of all discovered work is currently excluded from auto-apply before any
-other consideration. That makes one chain the critical path:
+quarter of all discovered work is excluded from auto-apply before anything else
+is considered. The chain:
 
 ```
 Gmail auth  →  OTP retrieval  →  Workday account creation succeeds
@@ -61,14 +61,16 @@ Gmail auth  →  OTP retrieval  →  Workday account creation succeeds
             →  24% of the queue becomes applyable
 ```
 
-Every link is built except the first. The Workday map (D15) is the right thing
-to have built, but its payoff is gated behind Gmail, not behind the map itself.
+**Gmail auth and OTP retrieval are now done** (D23). The operator signed in;
+the session verifies headlessly; `applypilot otp --once` reads from it. What
+remains on this chain is proving that a Workday account creation actually
+completes with a retrieved code, and only then taking Workday off the skip
+list. Do not remove it from `sites.yaml` before that is demonstrated on one
+real application.
 
-Auto-applyable **today**, without Gmail: Ashby, Greenhouse, Lever, Jobvite,
-Oracle and the long tail — no account required on most. Four above-threshold
-jobs sit there now, untailored.
-
----
+Auto-applyable **today**: Ashby, Greenhouse, Lever, Jobvite, Oracle and the
+long tail — no account required on most. Four above-threshold jobs sit there
+now, untailored.
 
 ## Next up
 
@@ -84,12 +86,9 @@ jobs sit there now, untailored.
    `data-automation-id` convention or Greenhouse's long-stable field ids, I have
    no real knowledge of Paylocity's markup, and inventing selectors would add
    noise rather than coverage. Needs one look at a live form.
-3. **Gmail — resolve the OTP blocker.** §6 chose browser-session scraping
-   because the OAuth console setup kept stalling. That premise may be obsolete:
-   `googleworkspace/cli` (skills.sh, 71K installs, official Google source) has
-   `gws auth login` — interactive browser OAuth with **no Google Cloud project
-   setup**. Test it before building a scraper; a real API beats reading markup.
-   If it works, §6 needs rewriting and a D23 recording the change.
+3. **Prove one Workday account creation end to end**, using a retrieved OTP.
+   Only after that succeeds, remove `myworkdayjobs.com` from `manual_ats` in
+   `config/sites.yaml`. That single line is what gates 24% of the queue.
 4. **Two live cover letters currently fail validation.** Both predate the
    150–200 word target so the length errors are expected, but one also claims
    the employer has "100+ offices nationwide" — a number that appears nowhere
@@ -122,6 +121,12 @@ jobs sit there now, untailored.
 ---
 
 ## Recently finished
+
+- **Gmail unblocked** (D23, D24). `scripts/gmail_login.py` establishes the
+  session; `tracking/gmail_browser.py` reads it. Read-only. Both the OTP poller
+  and `run_tracking` prefer it and fall back to MCP. Verified on live mail: a
+  tracking dry run fetched 20 emails and matched a real confirmation to the one
+  submitted application.
 
 - **M9 complete.** `reports.py` — per-stage JSONL (`logs/<stage>.jsonl`) plus
   `applypilot report`, written automatically at the end of every run. systemd

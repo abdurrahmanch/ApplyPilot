@@ -339,7 +339,18 @@ def run_tracking(
     """
     import asyncio
 
-    from applypilot.tracking.gmail_client import search_application_emails, read_email_bodies
+    # Prefer the signed-in browser profile; fall back to the MCP client.
+    # The pipeline below cannot tell which one it got — see
+    # gmail_browser._to_tracking_shape (ARCHITECTURE §6).
+    from applypilot.tracking import gmail_browser
+    if gmail_browser.available():
+        _browser_source = True
+        search_application_emails = gmail_browser.search_application_emails
+        read_email_bodies = gmail_browser.read_email_bodies
+    else:
+        _browser_source = False
+        from applypilot.tracking.gmail_client import (
+            search_application_emails, read_email_bodies)
     from applypilot.tracking.classifier import classify_email
     from applypilot.tracking.triage import triage_batch
     from applypilot.tracking.ghosting import detect_ghosted
@@ -359,7 +370,9 @@ def run_tracking(
 
     # 1. Search emails (metadata only — no body reads)
     try:
-        emails = asyncio.run(search_application_emails(days=days, limit=limit))
+        emails = (search_application_emails(days=days, limit=limit)
+                  if _browser_source
+                  else asyncio.run(search_application_emails(days=days, limit=limit)))
     except Exception as e:
         console.print(f"[red]Gmail fetch failed:[/red] {e}")
         console.print("[dim]Run `applypilot track --setup` to verify Gmail connectivity.[/dim]")
@@ -403,7 +416,9 @@ def run_tracking(
     if llm_emails:
         console.print(f"  Reading {len(llm_emails)} email bodies for LLM classification...")
         try:
-            bodies = asyncio.run(read_email_bodies([e["id"] for e in llm_emails]))
+            _ids = [e["id"] for e in llm_emails]
+            bodies = (read_email_bodies(_ids) if _browser_source
+                      else asyncio.run(read_email_bodies(_ids)))
         except Exception as e:
             log.warning("Body read failed: %s", e)
             bodies = {}

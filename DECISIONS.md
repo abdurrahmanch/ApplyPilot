@@ -435,3 +435,35 @@ design about to change. The other two wrap settled behaviour — the validator a
 the escalation taxonomy — and `cover-letter-review` calls the pipeline's own
 validator rather than reimplementing the rules, so its verdict cannot drift from
 what shipping actually decides.
+
+### D23 — Gmail is read from a browser session, and it is read-only  (2026-08-19)
+**Decision:** `tracking/gmail_browser.py` scrapes a signed-in Chromium profile
+at `~/.applypilot/gmail-profile`. Both the OTP poller and `run_tracking` prefer
+it and fall back to the MCP client when no profile exists.
+**Why:** §6 called for it, and the blocker was real — OAuth setup never
+completed, and the Workday-heavy queue (24% of everything) sits behind code
+retrieval. The operator signed in once; the session verified headlessly on the
+first try and `run_tracking` immediately matched a live confirmation email to
+the one submitted application.
+**How it stays safe:** read-only by construction — no send, delete, or label
+calls exist in the module. `available()` checks for Google's auth cookies
+rather than the file's existence, because visiting Gmail signed out still
+writes cookies. Every entry point returns `[]` on failure; a tracking poll that
+finds nothing is normal, one that raises takes down its caller.
+**Two shapes on purpose:** `fetch()` yields the OTP shape
+(`email_id`/`body_text`/`received_at`) and the adapters yield the MCP client's
+(`id`/`body`/`date`). Unifying them would have meant editing the ten-step
+tracking pipeline; adapting at the boundary meant editing three lines.
+**Rejected:** one browser launch per query — it made a three-query run take
+minutes. One context now serves all three.
+**Not rejected, deferred:** `gws auth login` (browser OAuth, no cloud project)
+remains the better long-term answer because it is an API rather than markup. It
+should be tested before anyone invests further in selectors.
+
+### D24 — The login script watches cookies, not the URL  (2026-08-19)
+**Decision:** `scripts/gmail_login.py` decides sign-in succeeded by checking for
+Google's auth cookies on the context.
+**Why:** the first version watched `page.url`. The operator signed in
+successfully and the script sat there reporting nothing, then exited non-zero,
+because Gmail rewrites its fragment constantly and the URL check never matched.
+A session that plainly worked looked like a failure.
