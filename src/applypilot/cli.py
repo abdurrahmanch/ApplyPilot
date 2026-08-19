@@ -668,6 +668,85 @@ def dashboard() -> None:
     open_dashboard()
 
 
+@app.command()
+def review(
+    batch_id: int = typer.Option(None, "--batch", "-b",
+                                 help="Review a specific batch (default: the pending one)."),
+    show: bool = typer.Option(False, "--show",
+                              help="Print the batch summary without walking it."),
+) -> None:
+    """Open the review gate for the pending batch.
+
+    This is the only human touchpoint in the pipeline, and approving here is
+    the only thing that lets submission start.
+    """
+    _bootstrap()
+
+    from applypilot.database import get_connection
+    from applypilot.review.batch import get_batch, get_pending_batch
+    from applypilot.review.tui import review_batch
+
+    conn = get_connection()
+
+    if show:
+        batch = get_batch(conn, batch_id) if batch_id else get_pending_batch(conn)
+        if batch is None:
+            console.print("[yellow]No pending review batch.[/yellow]")
+            raise typer.Exit(0)
+        outstanding = [i for i in batch["items"] if i["resolution"] is None]
+        console.print(f"Batch {batch['id']} ({batch['status']}): "
+                      f"{len(batch['items'])} item(s), {len(outstanding)} outstanding")
+        for item in outstanding:
+            payload = item["payload"]
+            label = payload.get("question") or payload.get("title") or ""
+            console.print(f"  [{item['kind']}] {label[:70]}")
+        raise typer.Exit(0)
+
+    review_batch(conn, batch_id)
+
+
+@app.command()
+def parked(
+    resolve: int = typer.Option(None, "--resolve", help="Mark a parked entry resolved by id."),
+    outcome: str = typer.Option("resolved", "--outcome", help="Outcome to record."),
+) -> None:
+    """Inspect and resolve the parked queue."""
+    _bootstrap()
+
+    from applypilot.database import get_connection
+
+    conn = get_connection()
+
+    if resolve is not None:
+        conn.execute(
+            "UPDATE parked SET resolved_at = datetime('now'), outcome = ? WHERE id = ?",
+            (outcome, resolve))
+        conn.commit()
+        console.print(f"[green]Parked entry {resolve} resolved ({outcome}).[/green]")
+        raise typer.Exit(0)
+
+    rows = conn.execute(
+        "SELECT p.id, p.application_id, p.reason, p.parked_at, j.title, j.site "
+        "FROM parked p LEFT JOIN jobs j ON j.url = p.application_id "
+        "WHERE p.resolved_at IS NULL ORDER BY p.parked_at DESC").fetchall()
+
+    if not rows:
+        console.print("[green]Parked queue is empty.[/green]")
+        raise typer.Exit(0)
+
+    table = Table(title=f"Parked ({len(rows)})")
+    table.add_column("id", justify="right")
+    table.add_column("reason")
+    table.add_column("company")
+    table.add_column("role")
+    table.add_column("since")
+    for row in rows:
+        table.add_row(str(row["id"]), row["reason"], (row["site"] or "?")[:20],
+                      (row["title"] or "?")[:34], (row["parked_at"] or "")[:16])
+    console.print(table)
+    console.print("[dim]Resolve with: applypilot parked --resolve <id>[/dim]")
+
+
 # `applypilot human-review` was deleted in plan 5 of the apply UX overhaul.
 # The standalone HITL server (port 7373) duplicated the in-pipeline HITL
 # flow (port 7380+wid), so it was removed. Jobs that get parked as
