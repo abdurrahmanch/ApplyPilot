@@ -2305,10 +2305,20 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         # Parse ACCOUNT_CREATED lines and save to DB
         _parse_account_created(output, job.get("url"))
 
-        # Parse QA: lines and store in knowledge base
+        # Parse QA: lines and store in knowledge base.
+        #
+        # Dry runs are explicitly excluded. A dry run is a rehearsal: nothing it
+        # produced was reviewed, and nothing an employer saw depended on it. On
+        # 2026-08-19 a dry run invented a personal-fact answer, stored it here,
+        # and the next real submission replayed it as a "known" answer, because
+        # the agent is told to reuse the bank. The bank must only ever contain
+        # answers that actually went out or that a human approved.
         job_url = job.get("url")
         job_ats = detect_ats(job.get("application_url") or job_url or "")
-        _parse_qa_lines(output, job_url=job_url, ats_slug=job_ats)
+        if dry_run:
+            logger.info("dry run: not storing Q&A pairs in the knowledge base")
+        else:
+            _parse_qa_lines(output, job_url=job_url, ats_slug=job_ats)
 
         def _clean_reason(s: str) -> str:
             return re.sub(r'[*`"]+$', '', s).strip()
