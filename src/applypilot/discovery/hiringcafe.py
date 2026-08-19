@@ -157,6 +157,10 @@ async ({buildId, state, page}) => {
 """
 
 
+# Delay between result pages. The endpoint is not ours to hammer.
+PAGE_DELAY_MS = 1500
+
+
 def fetch_query(name: str, max_pages: int = MAX_PAGES) -> list[dict]:
     """Fetch every page of one query from inside the logged-in browser session."""
     from playwright.sync_api import sync_playwright
@@ -194,8 +198,35 @@ def fetch_query(name: str, max_pages: int = MAX_PAGES) -> list[dict]:
             log.info("hiring.cafe buildId=%s query=%s", build_id, name)
 
             for page_no in range(max_pages):
-                res = pg.evaluate(_FETCH_JS, {"buildId": build_id, "state": state,
-                                              "page": page_no})
+                # Pace the pages. Everything else in this pipeline paces
+                # deliberately; this loop hammered the endpoint as fast as it
+                # could, and a run died on page 1 with "Failed to fetch".
+                if page_no:
+                    pg.wait_for_timeout(PAGE_DELAY_MS)
+
+                res = None
+                for attempt in range(2):
+                    try:
+                        res = pg.evaluate(_FETCH_JS, {"buildId": build_id,
+                                                      "state": state,
+                                                      "page": page_no})
+                        break
+                    except Exception as e:
+                        # A network blip inside the page must not throw away
+                        # the pages already collected. Retry once, then stop
+                        # the query and keep what we have — park and continue,
+                        # the same rule the rest of the pipeline follows.
+                        log.warning("hiring.cafe %s page %d fetch failed "
+                                    "(attempt %d/2): %s", name, page_no,
+                                    attempt + 1, e)
+                        if attempt == 0:
+                            pg.wait_for_timeout(PAGE_DELAY_MS * 4)
+                if res is None:
+                    log.warning("hiring.cafe %s stopping at page %d; keeping "
+                                "the %d hit(s) already collected",
+                                name, page_no, len(hits))
+                    break
+
                 if res.get("error"):
                     log.warning("hiring.cafe page %d returned HTTP %s",
                                 page_no, res["error"])

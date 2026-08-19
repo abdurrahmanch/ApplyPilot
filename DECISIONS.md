@@ -467,3 +467,40 @@ Google's auth cookies on the context.
 successfully and the script sat there reporting nothing, then exited non-zero,
 because Gmail rewrites its fragment constantly and the URL check never matched.
 A session that plainly worked looked like a failure.
+
+### D25 — The score floor for this operator's runs is 4, not 8  (2026-08-19)
+**Decision:** runs pass `--min-score 4`. The shipped default stays 8 so upstream
+behaviour is untouched.
+**Why:** the operator's instruction, and it restores the original design intent.
+D4 already recorded it — *"low sanity floor, curated queries do the real
+filtering"* — but the inherited funnel spec's `min_score=8` was never overridden
+in practice, so the LLM scorer had been acting as a second filter on top of a
+curated list that had already filtered.
+
+Every row in the database arrived through two hand-built hiring.cafe
+`searchState` blobs carrying 134 quoted job titles. The queries **are** the
+keyword filter. The scorer's remaining job is to strip what the queries cannot
+see — seniority, clearance requirements, non-US roles — not to re-decide
+relevance.
+
+**The evidence that 4 is the right floor**, from 124 scored rows:
+
+| Floor | unapplied | auto-applyable |
+|---|---|---|
+| 8 | 6 | 3 |
+| 6 | 15 | 9 |
+| **4** | **37** | **18** |
+| 3 | 42 | 21 |
+
+At floor 4 the admitted roles are Full Stack Developer, Backend Developer,
+Software Developer, Application Developer, Associate Software Engineer — the
+target profile exactly. What sits below it is Senior/Staff/Sr./Lead titles and a
+Shanghai posting, which is the scorer doing the one job it should still do (D6
+makes senior titles a hard 1–2).
+
+**Rejected:** floor 3 — it adds three applyable roles and starts admitting rows
+the scorer flagged for reasons the queries genuinely cannot catch. **Rejected:**
+disabling scoring altogether — the seniority and eligibility filters are load
+bearing, and 80 of 124 rows scored 1–2 for good reasons.
+**Revisit when:** the operator reviews scorer calibration (§4). This decision
+changes the floor, not the calibration question, which stays open.

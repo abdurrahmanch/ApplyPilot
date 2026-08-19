@@ -110,9 +110,17 @@ shortcuts obviously irrelevant postings with no LLM call at all. Ordering is
 `COALESCE(posted_at, discovered_at) DESC`, `fit_score` as tiebreaker, with a
 per-company round-robin window.
 
-**Open calibration question:** 7 of 124 scored above threshold. That's either an
-accurate scorer or one discarding viable roles. Resolve empirically — sample 20
-of the 117 rejects, read them, decide. Don't tune the prompt on intuition.
+**The floor is 4, not 8** (D25). The two curated hiring.cafe blobs carry 134
+quoted job titles and are the real keyword filter; the scorer's remaining job is
+to strip what a query cannot see — seniority, clearance, non-US — not to
+re-decide relevance. At floor 8 only 3 rows were auto-applyable; at floor 4, 18
+are, and what sits below is Senior/Staff/Lead titles. Pass `--min-score 4`; the
+shipped default stays 8 so upstream behaviour is untouched.
+
+**Open calibration question, still open.** The floor is not the calibration.
+80 of 124 rows scored 1–2, which looks right by title but has not been read.
+Resolve empirically — sample 20 rejects, read them, decide. Don't tune the
+prompt on intuition.
 
 **Tailor.** Full description (this is where truncation-missed disqualifiers
 surface). Validates against the `resume_facts` allowlist.
