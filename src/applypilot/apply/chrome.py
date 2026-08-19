@@ -329,6 +329,22 @@ ATS_DOMAINS: dict[str, str] = {
     "personio.com": "personio",
     "personio.de": "personio",
     "newtonsoftware.com": "newton",
+    # --- added 2026-08-19 from the UNKNOWN bucket audit (ARCHITECTURE §12).
+    # 101 of 232 rows with an application_url detected as UNKNOWN; these
+    # patterns reclassify the recognisable vendors in that bucket. What
+    # remains after them is genuinely bespoke employer career pages, which no
+    # selector map can cover — the agent fallback is correct there.
+    "paylocity.com": "paylocity",       # the one proven successful submission
+    "betterteam.com": "betterteam",
+    "pageuppeople.com": "pageup",
+    "eightfold.ai": "eightfold",
+    "jibeapply.com": "jibe",
+    "applytojob.com": "jazzhr",         # JazzHR's apply domain
+    "paycor.com": "paycor",
+    "recruitingbypaycor.com": "paycor",
+    "paradox.ai": "paradox",
+    "smartsearchonline.com": "smartsearch",
+    "jobs.gem.com": "gem",              # host-qualified: bare 'gem.com' over-matches
 }
 
 

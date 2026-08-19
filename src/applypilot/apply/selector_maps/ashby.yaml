@@ -1,0 +1,13 @@
+# Ashby hosted application form. status: unverified (see greenhouse.yaml).
+ats: ashby
+status: unverified
+last_verified: null
+verified_against: null
+
+fields:
+  full_name:    {selector: "input[name='_systemfield_name']",  source: "profile.personal.full_name"}
+  email:        {selector: "input[name='_systemfield_email']", source: "profile.personal.email"}
+  phone:        {selector: "input[name='_systemfield_phone']", source: "profile.personal.phone"}
+  resume:       {selector: "input[type=file]", source: "file.resume", kind: file}
+  linkedin:     {selector: "input[name*='linkedin' i]", source: "profile.personal.linkedin_url"}
+  github:       {selector: "input[name*='github' i]",   source: "profile.personal.github_url"}

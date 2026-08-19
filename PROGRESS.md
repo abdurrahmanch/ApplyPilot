@@ -1,157 +1,114 @@
-# PROGRESS.md — session handoff
+# PROGRESS.md
 
-**Last updated:** 2026-08-19, end of second build session.
-**Read this with `CLAUDE.md` (architecture) and `DECISIONS.md` (why things are
-the way they are).** Where this file and CLAUDE.md disagree about how the world
-works, this file is newer — CLAUDE.md was written before the code was read.
+**Rewritten at the end of each working session** (ARCHITECTURE §8). Read this
+first, then `ARCHITECTURE.md` for the design and `DECISIONS.md` for why.
+
+**Last updated:** 2026-08-19, end of the architecture-v2 adoption session.
 
 ---
 
-## Where things stand
+## Current state
 
-| Milestone | State | Notes |
-|---|---|---|
-| M0 fork + verify | **done** | All six section-3 VERIFY items answered in DECISIONS.md |
-| M1 Claude consolidation | **done** | `claude_cli` provider in `llm.py`; no API key anywhere |
-| M2 hiring.cafe discovery | **done** | 268 real jobs landed, 219 companies |
-| M3 scoring patch | **done** | Prompt retargeted, batched, recency ordering |
-| M4 schema + question bank | **done** | 6 tables, similarity matching, 25 seeded answers |
-| M5 register + letters | **done** | Voice register written and wired, sameness check |
-| M6 review gate | **done** | `applypilot review`, full escalation logic |
-| M7 apply hardening | **done** | Pacing, parking, proof, per-ATS cooldowns |
-| M8 Gmail + OTP | **code done, BLOCKED on auth** | See blockers |
-| M9 timers + reports | **in progress** | Gate wired end to end; timers + reports next |
+**Runs today:** discover → enrich → score → tailor → cover → pdf → gate.
+`applypilot run` ends at the gate. Approval is enforced in code
+(`acquire_job(require_gate=True)`), not by convention. Submission is manual:
+`applypilot apply` after the gate clears a batch.
 
-**Tests: 508 passed, 3 skipped.** Run with:
+**Tests: 531 passed, 3 skipped.**
 ```bash
 .venv/bin/python -m pytest -q tests --ignore=tests/test_extension_server.py
 ```
-`test_extension_server.py` segfaults in X11 code (`chrome.py:_raise_x11_window`).
-Pre-existing, unrelated to any of this work, hence the ignore.
+`test_extension_server.py` segfaults in X11 code. Pre-existing, unrelated.
 
-**One real application was submitted** on 2026-08-19: BisectHosting, Web
-Developer, via Paylocity. Confirmed "Application Successful".
+**Measured this session (this is the data §5 and §9 were missing):**
 
----
+| ATS family | rows with an application_url | share |
+|---|---|---|
+| UNKNOWN (genuine long tail) | 62 | 26.7% |
+| **workday** | **56** | **24.1%** |
+| ashby | 17 | 7.3% |
+| greenhouse | 15 | 6.5% |
+| icims | 10 | 4.3% |
+| paylocity | 9 | 3.9% |
+| lever | 3 | 1.3% |
 
-## Done this session — the gate is now binding
+232 rows total. Greenhouse + Lever together are 7.8% — see D15.
 
-The two wire-ups that made the gate advisory are closed. See DECISIONS.md
-D9-D13 for why each is shaped the way it is.
+**Not yet measured:** wall clock per application, rate-limit headroom, agent
+fallback rate. `submission_proof` is empty, so the 400–860s figure in §5 comes
+from earlier notes, not from this system. The filler's before/after comparison
+cannot be run until an application goes out.
 
-- **`gate` is a pipeline stage** (`STAGE_ORDER[-1]`, downstream of `pdf`). It
-  calls `review.prepare.build_run_batch` and never submits, so
-  `applypilot run` now ends at the human touchpoint instead of past it.
-  `applypilot run gate` runs it alone.
-- **`acquire_job(require_gate=True)` is the default.** Nothing cleared means
-  nothing acquired, and `apply` refuses before launching a browser. Bypasses:
-  `--no-gate` (labelled in the banner) and an explicit `--url`.
-- **`review/prepare.py`** is the new seam between the pipeline and the gate:
-  ready / disqualified / parked, with the readiness predicate mirroring
-  `acquire_job` — manual-ATS URLs, open `parked` rows, and terminal failure
-  states are all diverted to awareness lines rather than cleared.
-- **`migrations/003_review_membership.sql`** records batch membership
-  explicitly. Without it a flawless application (no questions escalated, no
-  cover delta) raised zero `review_items` and could never be cleared.
-- **Sensitive questions are batch-scoped, one per category.** Filed with
-  `application_id = NULL`; an unresolved one blocks the whole batch. This took
-  the first live batch from 12 items to 4.
-- **23 new tests** in `tests/test_gate_wiring.py`.
-
-Live check on his DB: the one prepared job (IMEG, Workday) is on the
-manual-ATS skip list, so the queue is honestly empty — `acquire_job` would
-have refused it anyway. Batch 2 exists and is pending; it holds three
-sensitive confirmations and one cover delta. Nothing has been approved.
-
-## Do this next (rest of M9)
-
-1. **systemd user timers.**
-   - `jobpipe-prepare.timer` — Mon/Wed/Fri early morning. Runs
-     `applypilot run` (which now ends at `gate`) and exits. It must NEVER
-     submit; that property is now enforced in code, not just by convention.
-   - `jobpipe-otp-poller.timer` — every 60s during an apply phase, every 15min
-     otherwise (see `applypilot otp --interval`).
-   - Submission stays manual: `applypilot apply` after gate approval.
-2. **Run reports.** Plain text per run: discovered N, deduped N, gated N,
-   prepared N, review items by kind; after approval, submitted N, parked N with
-   reasons, per-ATS outcomes. `apply/pacing.ats_health()` already computes the
-   per-ATS part, and `review.prepare.build_run_batch` already returns the
-   prepared/gated counts.
-3. **JSONL logs per stage** in `logs/`. The run report is the summary; the
-   JSONL is the truth.
-4. **Anticipated questions are only as good as `question_sightings`.** That
-   table is still nearly empty, so per-application questions almost never
-   surface at the gate and novel ones land at apply time via HITL instead.
-   This corrects itself as real applications run; do not "fix" it by widening
-   what the gate guesses.
+**Half-built:** the deterministic filler. Planning, script generation, the
+fallback ledger, and the prompt block are done and tested (22 tests, no browser
+needed). Three selector maps exist — workday, ashby, greenhouse — all
+`status: unverified`. No map has been checked against a live page, which is
+safe by construction (D16) but means the real fill rate is unknown.
 
 ---
 
-## Blockers for Abdur-Rahman
+## Next up
 
-1. **Gmail OAuth is not set up.** `applypilot otp --once` fails with
-   "Gmail MCP session failed". M8 code is written and tested but cannot run
-   until this exists. Needs:
-   - a dedicated job-search Gmail account with a password unique to this system
-   - `npx @gongrzhe/server-gmail-autoauth-mcp@1.1.11 auth` run once, which
-     writes `~/.gmail-mcp/credentials.json`
-   - Google Cloud OAuth desktop credentials saved to
-     `~/.gmail-mcp/gcp-oauth.keys.json`
-   He offered to authenticate in a browser rather than hand over credentials,
-   so drive this the same way the hiring.cafe login was done.
-2. **hiring.cafe session expires.** Re-auth with
-   `.venv/bin/python scripts/hc_login.py` when discovery reports a session
-   error. Profile lives at `~/.applypilot/hiringcafe-profile`.
-3. **Anasheed conflict was resolved but the resume still overstates it.** He
-   confirmed only the database schema exists. `~/.applypilot/resume.txt` was
-   trimmed to three design-verb bullets; the master resume he pasted still has
-   six. Ask before touching the master.
-4. **Open questions he has not answered:**
-   - Verbatim resume bullets from the "Test" three-resume chat
-   - LinkedIn headline / About copy
-   - Whether the three public links (github, linkedin, duhamedia.com) render
-     publicly
-   - Whether to trim the master resume's Anasheed section to match
-5. **Cost:** ~$1.69 per application at the apply stage. 17/run is ~$29/run,
-   ~$87/week. He has not been asked to approve that rate.
-6. **Secrets exposure (raised, not yet acted on):** `~/.claude/projects` logs
-   contain his sudo password and live Shopify tokens in plaintext. Rotation
-   recommended.
-
----
-
-## Things that surprised us (do not re-derive these)
-
-- **hiring.cafe's documented API is gone.** `POST /api/search-jobs` 405s. Real
-  endpoint is `GET /_next/data/{buildId}/index.json?searchState=...&page=N`
-  with header `x-nextjs-data: 1`, from inside a logged-in browser. `buildId`
-  changes on every deploy, so it is scraped per run.
-- **hiring.cafe returns no job descriptions.** CLAUDE.md says enrich is a no-op
-  for these rows. It is not — enrich is required and scrapes `apply_url`.
-- **The searchState schema in CLAUDE.md §5 is wrong on four points** (lat/lon
-  are floats not strings, no `flexible_regions`, `workplace_types` is
-  per-location, the field is `jobTitleQuery` not `searchQuery`).
-- **The inherited scoring prompt described a different person** — Seattle,
-  senior, Go/Kotlin. Rewritten around profile.json.
-- **The inherited cover-letter target (250-400 words) produced padding.**
-  Dropped to 150-200 per section 7.
-- **A dry run polluted the Q&A bank**, and the next real submission replayed a
-  fabricated answer from it. Dry runs no longer write to the bank.
-- **The ATS mix is harder than section 11 assumes.** Greenhouse/Lever/Ashby are
-  a minority; Workday, Oracle Cloud, SuccessFactors, iCIMS, Taleo and BrassRing
-  dominate. This is why M8 matters more than the build order implies.
+1. **Verify the Workday selector map against a live form.** Everything else in
+   the filler is done. Open any Workday application in the discovery browser,
+   run the generated script by hand, and record which of the eight selectors
+   match. Then set `last_verified` and `verified_against` in
+   `src/applypilot/apply/selector_maps/workday.yaml`. This is the single step
+   that turns the filler from plumbing into a measured win.
+2. **Map Paylocity.** Nine rows, and it is the ATS of the only successful
+   submission this system has made, so a working path through it already
+   exists. No map file yet.
+3. **Gmail — resolve the OTP blocker.** ARCHITECTURE §6 chose browser-session
+   scraping because the OAuth console setup kept stalling. That premise may be
+   obsolete: `googleworkspace/cli` (skills.sh, 71K installs, official Google
+   source) offers `gws auth login` — interactive browser OAuth with **no Google
+   Cloud project setup**. Test it before building the scraper; a real API beats
+   reading markup. If it works, §6 needs rewriting and a D19 recording the
+   change.
+4. **Finish M9.** systemd user timers (prepare Mon/Wed/Fri, which now cannot
+   submit even by accident; OTP poller), plain-text run reports, per-stage
+   JSONL logs in `logs/`.
+5. **Discovery: read the rendered page** instead of the `_next/data` route
+   (§3). Needs a live logged-in session to check whether the rendered page
+   carries description text — if it does, enrich drops back to a fallback.
+6. **hiring.cafe apply-marking click** (§3), keyed off `submission_proof`, never
+   off a park or a failure.
+7. **Fabricated-metric check** (§4, §13.6): extract every numeral from a cover
+   letter and require it to appear in `resume_facts.real_metrics` or the job
+   description. Pure Python, no LLM. Not started.
+8. **Author the three skills** (§11) — `ats-form-fill`, `cover-letter-review`,
+   `gate-triage`. Deferred until the filler maps are verified; a skill encoding
+   a design that is mid-change is worse than none.
 
 ---
 
-## Operating notes
+## Blocked
 
-- Everything runs through the Claude Code CLI. No `ANTHROPIC_API_KEY` exists,
-  and `config.get_tier()` treats the `claude` binary as the LLM provider.
-- Scoring is batched at 10 jobs/call. Unbatched it costs ~$25/month against a
-  $10 ceiling; batched it is ~$9/month. Do not un-batch it.
-- Address him as **Abdur-Rahman**, never "Arch" (CLAUDE.md uses the old name
-  throughout). His surname is written **"Ch"** and never expanded.
-- **Keep replies short.** He asked for this directly.
-- Key paths: `~/.applypilot/` (profile.json mode 600, resume.txt,
-  candidate-dossier.md, applypilot.db), `~/Documents/Repositories/voice-profile/`
-  (read-only core + registers).
+- **OTP / email tracking** — blocked on Gmail auth. Unblocked by either
+  `gws auth login` (test this first, see Next up #3) or a logged-in browser
+  profile. This gates the Workday-heavy queue, which is 24% of everything.
+- **Filler before/after measurement** — blocked on a live application running.
+  Nothing to measure until then.
+- **Scoring calibration** (§4) — 7 of 124 above threshold. Blocked on a human
+  reading a sample of 20 rejects. Do not tune the prompt on intuition.
+- **Credential rotation** — needs the operator: the sudo password and the live
+  third-party tokens in `~/.claude/projects` logs cannot be rotated from here.
+  Log scrubbing is destructive and needs explicit go-ahead.
+
+---
+
+## Recently finished
+
+- **Architecture v2 adopted.** `ARCHITECTURE.md` at the repo root, the standing
+  rule in force, D14–D18 recorded.
+- **Deterministic filler built** (§5): `apply/form_fill.py` plus three selector
+  maps, wired additively into the apply prompt. An unmapped ATS produces an
+  empty block and falls straight through to the existing agent path.
+- **`detect_ats` gaps closed** (D17). UNKNOWN went from 101 rows (44%) to 62
+  (27%) with eleven dict entries. This is what revealed that Workday, not
+  Greenhouse, is the family worth mapping first.
+- **§12 audit run** (report only, no changes): enrichment already tiers
+  JSON-LD → deterministic selectors → LLM, so the suspected waste there does
+  not exist. The real waste is the apply stage, which the filler now addresses.
+- **Review gate wired end to end** (previous session): the gate is binding, not
+  advisory. Three real defects found and fixed in the process.

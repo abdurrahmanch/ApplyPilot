@@ -1,0 +1,20 @@
+# Workday. The largest family in the queue (24% of rows with an application_url)
+# and the hardest: multi-page, per-tenant field ids, account creation first.
+# Expect a map + agent hybrid, per ARCHITECTURE §5.
+#
+# Workday's automation ids are stable across tenants even though the numeric
+# ids are not, so every selector here keys off data-automation-id.
+ats: workday
+status: unverified
+last_verified: null
+verified_against: null
+
+fields:
+  first_name: {selector: "input[data-automation-id='legalNameSection_firstName']", source: "profile.personal.first_name"}
+  last_name:  {selector: "input[data-automation-id='legalNameSection_lastName']",  source: "profile.personal.last_name"}
+  email:      {selector: "input[data-automation-id='email']",       source: "profile.personal.email"}
+  phone:      {selector: "input[data-automation-id='phone-number']", source: "profile.personal.phone"}
+  address_1:  {selector: "input[data-automation-id='addressSection_addressLine1']", source: "profile.personal.address"}
+  city:       {selector: "input[data-automation-id='addressSection_city']",         source: "profile.personal.city"}
+  postal:     {selector: "input[data-automation-id='addressSection_postalCode']",   source: "profile.personal.postal_code"}
+  resume:     {selector: "input[data-automation-id='file-upload-input-ref']", source: "file.resume", kind: file}

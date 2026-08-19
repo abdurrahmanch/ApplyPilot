@@ -316,3 +316,71 @@ out.
 gate reads the sibling `.txt`. Without that fallback every batch would have
 shown zero cover deltas and the batch-wide sameness check would never fire —
 silently, since a batch with no cover items looks like a clean batch.
+
+---
+
+## 2026-08-19 — Architecture v2 adoption
+
+### D14 — `ARCHITECTURE.md` is the living design, and editing it is part of the change  (2026-08-19)
+**Decision:** Architecture v2 lands at the repo root as `ARCHITECTURE.md` and
+supersedes `CLAUDE.md` wherever they conflict. The standing rule: any change to
+behaviour appends to `DECISIONS.md` and edits `ARCHITECTURE.md` in the same
+commit; any session that ends rewrites `PROGRESS.md`.
+**Why:** the previous arrangement let the design drift out of the code silently.
+`CLAUDE.md` predates most of the system and is wrong in several places, but
+nothing forced it to be corrected.
+**Replaces:** `CLAUDE.md` as the authoritative design document. `CLAUDE.md` stays
+for its inherited decision log (#0–#51) and operating notes.
+**Rejected:** deleting `CLAUDE.md` — the numbered decision log is the only
+record of why many non-obvious things are the way they are.
+
+### D15 — Filler rollout is Workday first, not Greenhouse  (2026-08-19)
+**Decision:** the deterministic filler starts with Workday, then Ashby plus
+Greenhouse together. Not Greenhouse/Lever.
+**Why:** measured, not assumed. Across the 232 rows that carry an
+`application_url`: Workday 56 (24%), Ashby 17 (7.3%), Greenhouse 15 (6.5%),
+Lever 3 (1.3%). Greenhouse and Lever together are 7.8% of the queue. ARCHITECTURE
+§5's "Greenhouse/Lever/Ashby near-fully deterministic" describes the easiest
+families, not the biggest ones, and starting there would optimise under a tenth
+of the work.
+**Replaces:** the implied rollout order in §5.
+**Rejected:** starting with the easiest family to prove the mechanism. The
+mechanism is proven by tests without a live page; what needs proving is that it
+pays, and only Workday is big enough to show that.
+
+### D16 — An unverified selector map is safe, so maps ship before verification  (2026-08-19)
+**Decision:** selector maps ship with `status: unverified` and no
+`last_verified` date. The generated fill script probes every selector with
+`querySelector` before writing, and reports any that did not match.
+**Why:** the alternative is a chicken-and-egg stall — maps cannot be verified
+without live applications, and applications are slow without maps. Probing
+first makes a wrong selector a no-op that reports itself, identical to an
+unmapped field. Nothing is ever filled blind.
+**Rejected:** refusing to use a map until verified (blocks the whole approach);
+filling optimistically and checking afterwards (a wrong selector could put a
+phone number in a salary field before anyone notices).
+
+### D17 — `detect_ats` gaps were a measurement bug, not a long tail  (2026-08-19)
+**Decision:** eleven domain patterns added — Paylocity, Betterteam, PageUp,
+Eightfold, Jibe, JazzHR (`applytojob.com`), Paycor, Paradox, SmartSearch, Gem.
+**Why:** 101 of 232 rows with an `application_url` (44%) classified as UNKNOWN,
+which read as "the queue is mostly bespoke career pages". It was not: a third of
+that bucket was recognisable vendors the detector had never been taught. After
+the patch UNKNOWN is 62 (27%) and the remainder really is a long tail — 46 of
+the original hosts appeared exactly once. Paylocity matters most: it is the ATS
+of the only successful submission this system has made.
+**Rejected:** nothing. This was a straight defect.
+
+### D18 — The fill plan reaches the agent as one script, not as N instructions  (2026-08-19)
+**Decision:** the resolved fields are rendered into a single JS blob the agent
+runs in one `browser_evaluate` call. File uploads are excluded and listed
+separately.
+**Why:** §0.1 wants no reasoning on known fields. Rewriting the browser-control
+layer to do native DOM writes would mean duplicating the working Playwright/CDP
+path, against §0.2. Handing the agent one script collapses N round trips into
+one tool call while leaving the existing transport untouched. Values are
+JSON-encoded, so a quote or newline in a profile field cannot break out of the
+script. The script goes through the native value setter and dispatches
+`input`/`change`, or React reverts every write on its next render.
+**Rejected:** a per-field instruction list (still N round trips); reimplementing
+DOM control outside the agent (rebuilds what exists).

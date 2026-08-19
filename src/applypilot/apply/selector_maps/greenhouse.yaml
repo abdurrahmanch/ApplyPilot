@@ -1,0 +1,21 @@
+# Greenhouse job-boards application form.
+#
+# status: unverified — no selector here has been checked against a live page.
+# That is safe by construction: the fill pass probes every selector before it
+# writes, and anything absent is reported as unresolved for the agent rather
+# than guessed at. A field that lands in unresolved twice is a map bug; see
+# ARCHITECTURE §5.
+ats: greenhouse
+status: unverified
+last_verified: null
+verified_against: null
+
+fields:
+  first_name:   {selector: "input#first_name",  source: "profile.personal.first_name"}
+  last_name:    {selector: "input#last_name",   source: "profile.personal.last_name"}
+  email:        {selector: "input#email",       source: "profile.personal.email"}
+  phone:        {selector: "input#phone",       source: "profile.personal.phone"}
+  resume:       {selector: "input[type=file][id*=resume]",       source: "file.resume", kind: file}
+  cover_letter: {selector: "input[type=file][id*=cover_letter]", source: "file.cover_letter", kind: file}
+  linkedin:     {selector: "input[id*=urls][id*=LinkedIn]", source: "profile.personal.linkedin_url"}
+  github:       {selector: "input[id*=urls][id*=GitHub]",   source: "profile.personal.github_url"}

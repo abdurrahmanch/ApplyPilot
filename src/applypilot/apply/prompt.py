@@ -713,6 +713,32 @@ def build_prompt(job: dict, tailored_resume: str,
     prior_path_block = format_path_for_prompt(load_path(_ats_slug)) if _ats_slug else None
     prior_path_section = (prior_path_block + "\n\n") if prior_path_block else ""
 
+    # Deterministic fill (ARCHITECTURE §5). Every field whose answer is already
+    # known — a profile key, a file path, a stored question-bank answer —
+    # becomes a single browser_evaluate instead of a round trip each. An ATS
+    # with no selector map produces an empty block and falls straight through
+    # to the agent path below, so this is a fast lane alongside the working
+    # system rather than a replacement for it.
+    fill_section = ""
+    try:
+        from applypilot.apply import form_fill
+        from applypilot.database import get_connection
+        fill_plan = form_fill.plan(_ats_slug, {
+            "profile": profile,
+            "files": {"resume": str(upload_doc),
+                      "cover_letter": cl_upload_path or None},
+            "conn": get_connection(),
+        })
+        block = form_fill.prompt_block(fill_plan)
+        if block:
+            fill_section = block + "\n\n"
+            form_fill.record_fallbacks(_ats_slug, fill_plan.get("unresolved") or [])
+    except Exception as e:
+        # A filler problem must never stop an application. Losing the fast
+        # lane costs time; losing the application costs an opportunity.
+        logger.warning("Deterministic fill plan unavailable for %s: %s",
+                       _ats_slug, e)
+
     prompt = f"""You are an autonomous job application agent. Your ONE mission: get this candidate an interview. You have all the information and tools. Think strategically. Act decisively. Submit the application.
 
 IMPORTANT: You are running on a REAL computer with FULL filesystem access. You are NOT in a sandbox. You CAN read/write files, upload documents, and access the local filesystem. The resume and cover letter paths below are real files on disk — use them directly.
@@ -737,7 +763,7 @@ Cover Letter {doc_format.upper()} (upload if asked): {cl_upload_path or "N/A"}
 == APPLICANT PROFILE ==
 {profile_summary}
 
-{prior_path_section}== YOUR MISSION ==
+{prior_path_section}{fill_section}== YOUR MISSION ==
 Submit a complete, accurate application. Use the profile and resume as source data -- adapt to fit each form's format.
 
 If something unexpected happens and these instructions don't cover it, figure it out yourself. You are autonomous. Navigate pages, read content, try buttons, explore the site. The goal is always the same: submit the application. Do whatever it takes to reach that goal.
