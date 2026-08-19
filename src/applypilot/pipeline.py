@@ -83,6 +83,7 @@ _UPSTREAM: dict[str, str | None] = {
 
 # Canonical name → description. Order determines default execution order.
 DISCOVERY_SOURCES: dict[str, str] = {
+    "hiringcafe":   "hiring.cafe (committed searchState queries)",
     "jobspy":       "JobSpy aggregator (LinkedIn, Indeed, ZipRecruiter)",
     "linkedin":     "LinkedIn only (via JobSpy)",
     "indeed":       "Indeed only (via JobSpy)",
@@ -96,6 +97,14 @@ DISCOVERY_SOURCES: dict[str, str] = {
     "smartextract": "Smart extract (AI-powered scraping, incl. Dice via sites.yaml)",
     "hackernews":   "Hacker News 'Who is Hiring?' thread",
 }
+
+# Sources that run when no explicit --source is given.
+#
+# hiring.cafe is the only launch source (CLAUDE.md section 5). Every upstream
+# source stays importable and individually runnable — `applypilot run discover
+# --source greenhouse` still works — but none of them run by default. They are
+# dormant, not deleted.
+DEFAULT_DISCOVERY_SOURCES: list[str] = ["hiringcafe"]
 
 # Alias → canonical name for CLI convenience
 _SOURCE_ALIASES: dict[str, str] = {
@@ -138,9 +147,26 @@ def _run_discover(workers: int = 1, sources: list[str] | None = None) -> dict:
         workers: Thread count for sources that support parallelism.
         sources: Canonical source names to run, or None for all.
     """
-    run_all = sources is None
-    active = list(DISCOVERY_SOURCES.keys()) if run_all else sources
+    active = list(DEFAULT_DISCOVERY_SOURCES) if sources is None else sources
     stats: dict = {s: None for s in active}
+
+    if "hiringcafe" in active:
+        console.print("  [cyan]hiring.cafe (committed queries)...[/cyan]")
+        try:
+            from applypilot.discovery.hiringcafe import run_hiringcafe_discovery
+            hc = run_hiringcafe_discovery(workers=workers)
+            for qname, s in hc.items():
+                console.print(
+                    f"  [dim]hiring.cafe/{qname}: {s['new']} new, "
+                    f"{s['existing']} existing, {s['deduped']} deduped "
+                    f"(of {s['hits']} hits)[/dim]")
+            stats["hiringcafe"] = hc
+        except Exception as e:
+            # QueryFileError / SessionError both land here. Both are halt-worthy
+            # for this source but must not take down other sources in the run.
+            log.error("hiring.cafe discovery failed: %s", e)
+            console.print(f"  [red]hiring.cafe error:[/red] {e}")
+            stats["hiringcafe"] = f"error: {e}"
 
     if "jobspy" in active:
         console.print("  [cyan]JobSpy full crawl...[/cyan]")
