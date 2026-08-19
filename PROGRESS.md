@@ -47,6 +47,29 @@ safe by construction (D16) but means the real fill rate is unknown.
 
 ---
 
+## The dependency that gates everything
+
+`myworkdayjobs.com` is on the manual-ATS skip list (`config/sites.yaml:11`,
+"requires account login, can't automate"). Workday is 24% of the queue, so a
+quarter of all discovered work is currently excluded from auto-apply before any
+other consideration. That makes one chain the critical path:
+
+```
+Gmail auth  →  OTP retrieval  →  Workday account creation succeeds
+            →  Workday comes off the manual-ATS list
+            →  the Workday selector map starts paying off
+            →  24% of the queue becomes applyable
+```
+
+Every link is built except the first. The Workday map (D15) is the right thing
+to have built, but its payoff is gated behind Gmail, not behind the map itself.
+
+Auto-applyable **today**, without Gmail: Ashby, Greenhouse, Lever, Jobvite,
+Oracle and the long tail — no account required on most. Four above-threshold
+jobs sit there now, untailored.
+
+---
+
 ## Next up
 
 1. **Verify the Workday selector map against a live form.** Everything else in
