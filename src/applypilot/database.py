@@ -269,6 +269,10 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     # Run migrations for any columns added after initial schema
     ensure_columns(conn)
 
+    # Apply the versioned SQL migrations (question bank, review gate, parked
+    # queue, email events). Idempotent — every statement is IF NOT EXISTS.
+    run_sql_migrations(conn)
+
     # Backfill apply categories for existing rows
     backfill_categories(conn)
 
@@ -355,6 +359,39 @@ _ALL_COLUMNS: dict[str, str] = {
     "score_attempts": "INTEGER DEFAULT 0",
     "score_next_retry_at": "TEXT",
 }
+
+
+MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
+
+
+def run_sql_migrations(conn: sqlite3.Connection | None = None,
+                       migrations_dir: Path | None = None) -> list[str]:
+    """Apply every .sql file in migrations/, in filename order.
+
+    Migrations are idempotent by construction (IF NOT EXISTS everywhere), so
+    they are re-applied on every startup rather than tracked in a version
+    table. A failing migration is logged and skipped — a broken optional table
+    must never stop the pipeline from running its existing stages.
+
+    Never hand-edit the live database; add a migration file instead.
+    """
+    if conn is None:
+        conn = get_connection()
+    directory = migrations_dir or MIGRATIONS_DIR
+    if not directory.exists():
+        return []
+
+    applied: list[str] = []
+    for path in sorted(directory.glob("*.sql")):
+        try:
+            conn.executescript(path.read_text())
+            applied.append(path.name)
+        except sqlite3.Error as e:
+            _log.error("Migration %s failed: %s", path.name, e)
+    if applied:
+        commit_with_retry(conn)
+        _log.debug("Applied %d SQL migration(s): %s", len(applied), ", ".join(applied))
+    return applied
 
 
 def ensure_columns(conn: sqlite3.Connection | None = None) -> list[str]:
