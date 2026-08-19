@@ -110,6 +110,21 @@ def build_seed_entries(profile: dict) -> list[dict]:
     add("Are you a protected veteran?", eeo.get("veteran_status"), "eeo")
     add("Do you have a disability?", eeo.get("disability_status"), "eeo")
 
+    # Personal facts he has stated directly. These exist so the agent answers
+    # from a fact rather than inferring one; anything not listed here still
+    # parks. Section 9 / the 2026-08-19 fabrication incident.
+    for key, question in (
+        ("gaming", "What is your experience with video games?"),
+        ("gaming", "Do you play video games?"),
+        # Wording observed verbatim on the BisectHosting form, 2026-08-19. Long
+        # parenthetical questions score ~0.72 against the short phrasing, just
+        # under the review floor, so the exact wording is banked as its own
+        # entry rather than loosening the threshold for everything.
+        ("gaming",
+         "What is your experience with video games at large (either working, playing, etc)?"),
+    ):
+        add(question, (profile.get("personal_facts") or {}).get(key), "personal_fact")
+
     # Sourcing question. Harmless, extremely common, and worth not re-asking.
     add("How did you hear about us?", "Online job board", "other")
 

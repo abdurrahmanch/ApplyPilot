@@ -61,16 +61,18 @@ def _build_cover_letter_prompt(profile: dict) -> str:
 
     return f"""Write a cover letter for {sign_off_name}. The goal is to get an interview.
 
-STRUCTURE: 4 paragraphs. TARGET 300-400 words; MINIMUM 260 words (Jobscan 3.4x interview-rate sweet spot is 250-400). Letters under 260 words get rejected automatically.
+STRUCTURE: 3 paragraphs. TARGET 150-200 words. Half a page, maximum. Letters over 260 words are rejected automatically.
 
-PARAGRAPH 1 — HOOK (4-6 sentences, ~80 words): Open with a specific thing YOU built that solves THEIR problem. Identify the problem they're hiring to solve (infer from the job description) and name the work you've done that directly addresses it. Include enough context that the reader understands the scope and impact. Not "I'm excited about this role." Not "This role aligns with my experience." Start with the work.
+Short and specific beats long and thorough. A reader spends seconds on this. Every sentence must carry a verifiable specific — a system, a tool, a client, a number. If a sentence could appear in someone else's letter, cut it.
 
-PARAGRAPH 2 — EVIDENCE (4-6 sentences, ~120 words): Pick 2 achievements from the resume that are MOST relevant to THIS job. For each, name the problem, the concrete action you took (specific tools, architecture decisions), and the quantified outcome. Use numbers. Frame each as solving their problem, not listing your accomplishments.{projects_hint}{metrics_hint}
+PARAGRAPH 1 — HOOK (2-3 sentences, ~50 words): Open with one concrete thing specific to THIS company: a product they ship, the stack in the posting, the problem they are hiring to solve. Then name the work you have done that addresses it. Not "I'm excited about this role." Start with the work.
 
-PARAGRAPH 3 — COMPANY FIT (3-4 sentences, ~70 words): Reference one specific thing about the company from the job description (a product, a technical challenge, a team structure). Connect it to your experience with a concrete parallel, not a generic nod. Show you've read the posting and that you've solved a similar shape of problem.
+PARAGRAPH 2 — EVIDENCE (3-4 sentences, ~100 words): Map 2-3 facts from the resume onto the role's stated needs. Name the problem, the concrete action (specific tools, architecture decisions), and the outcome. Use real numbers where the resume has them; never invent one.{projects_hint}{metrics_hint}
 If COMPANY is marked unknown, infer the employer from the job description. If the description doesn't name it either, write about the team's product and problem domain WITHOUT naming any company. NEVER treat the job board the listing came from (LinkedIn, Indeed, etc.) as the employer.
 
-PARAGRAPH 4 — CLOSE (2 sentences, ~30 words): Offer to go deeper on one or two SPECIFIC topics from your evidence paragraph, naming the actual system, migration, or metric. Write the offer in your own words; do not use stock closers ("Happy to walk through...", "I'd welcome the chance to discuss..."). Then sign off.
+PARAGRAPH 3 — CLOSE (1-2 sentences, ~25 words): Offer to go deeper on one SPECIFIC topic from the evidence paragraph, naming the actual system or decision. Write it in your own words; no stock closers ("Happy to walk through...", "I'd welcome the chance to discuss..."). Then sign off.
+
+DO NOT repeat a phrase across paragraphs. If "responsive design" or "full stack" appears twice, rewrite one of them.
 
 BANNED WORDS/PHRASES (using ANY of these = instant rejection):
 "resonated", "aligns with", "passionate", "eager", "eager to", "excited to apply", "I am confident",
@@ -172,12 +174,18 @@ def generate_cover_letter(
         # The model chronically undershoots length; a generic "too short"
         # error doesn't fix it. Give explicit per-paragraph expansion targets.
         words = len(letter.split())
-        if words < 260:
+        if words > 260:
             avoid_notes.append(
-                f"Your previous draft was only {words} words. The minimum is 260; "
-                "target 300-400. Expand the hook to ~80 words and the evidence "
-                "paragraph to ~120 words with additional concrete details, tools, "
-                "and numbers from the resume. Do not pad with filler."
+                f"Your previous draft ran to {words} words. The maximum is 260 and "
+                "the target is 150-200. Cut whole sentences rather than trimming "
+                "words: drop any claim that is not specific to this employer, and "
+                "delete repeated phrases. Do not summarize what you already said."
+            )
+        elif words < 130:
+            avoid_notes.append(
+                f"Your previous draft was only {words} words. The minimum is 130; "
+                "target 150-200. Add one more concrete fact from the resume, with "
+                "the tool or system named. Do not pad with filler."
             )
         log.debug(
             "Cover letter attempt %d/%d failed: %s",

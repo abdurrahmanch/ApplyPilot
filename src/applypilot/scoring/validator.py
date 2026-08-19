@@ -373,17 +373,23 @@ def validate_cover_letter(text: str) -> dict:
     if hits:
         errors.append(f"Banned phrase(s): {', '.join(hits)}")
 
-    # 3. Word count — Jobscan's 250-400 target is the ideal; the prompt aims
-    # at 300-400. In practice the LLM averages 220-270 with other constraints,
-    # and the user characterizes that as "close enough". Hard floor only
-    # catches genuinely truncated output (<180 words = LLM bailed).
+    # 3. Word count — 150-200 words, half a page (CLAUDE.md section 7).
+    #
+    # This replaces the inherited 250-400 "Jobscan ideal". Decided 2026-08-19
+    # on evidence: a 266-word letter generated under the old target repeated
+    # "responsive design" five times and "I've built" four times. A high word
+    # target buys padding, and padding is exactly what reads as machine-written.
+    # Enforced as 150-220 rather than 150-200 so a letter that lands slightly
+    # long is not thrown away and regenerated over 20 words.
     words = len(text.split())
-    if words > 500:
-        errors.append(f"Too long ({words} words). Target 250-400 per Jobscan.")
-    if words < 180:
-        errors.append(f"Too short ({words} words). Target 250-400 per Jobscan; minimum 180.")
-    elif words < 250:
-        warnings.append(f"Below Jobscan ideal ({words} words, target 250-400) — passes but flagged.")
+    if words > 260:
+        errors.append(f"Too long ({words} words). Target 150-200, half a page.")
+    elif words > 220:
+        warnings.append(f"Slightly long ({words} words, target 150-200) — passes but flagged.")
+    if words < 130:
+        errors.append(f"Too short ({words} words). Target 150-200; minimum 130.")
+    elif words < 150:
+        warnings.append(f"Slightly short ({words} words, target 150-200) — passes but flagged.")
 
     # 4. LLM self-talk
     found_leaks = [p for p in LLM_LEAK_PHRASES if p in text_lower]
@@ -395,17 +401,19 @@ def validate_cover_letter(text: str) -> dict:
     if not stripped.lower().startswith("dear"):
         errors.append("Must start with 'Dear Hiring Manager,'")
 
-    # 6. Structure: prompt demands 4 body paragraphs (hook, evidence, company
-    # fit, close). "Substantial" = >= 15 words, which excludes the salutation
-    # and sign-off blocks. Before this check, the company-fit paragraph
-    # silently collapsed into the closer in most generated letters.
+    # 6. Structure: one company-specific hook, one paragraph mapping resume
+    # facts to the role's stated needs, one closing line (CLAUDE.md section 7).
+    # Three substantial paragraphs, not four — four does not fit in 150-200
+    # words without padding, and padding is the failure mode being designed
+    # out. "Substantial" = >= 15 words, which excludes salutation and sign-off.
     body_paragraphs = [p for p in re.split(r"\n\s*\n", text) if len(p.split()) >= 15]
-    if len(body_paragraphs) < 3:
+    if len(body_paragraphs) < 2:
         errors.append(
-            f"Only {len(body_paragraphs)} body paragraph(s); structure requires 4 "
-            "(hook, evidence, company fit, close)."
+            f"Only {len(body_paragraphs)} body paragraph(s); structure requires "
+            "3 (company-specific hook, evidence, close)."
         )
-    elif len(body_paragraphs) == 3:
-        warnings.append("Only 3 body paragraphs; target structure is 4.")
+    elif len(body_paragraphs) > 4:
+        warnings.append(
+            f"{len(body_paragraphs)} body paragraphs; target structure is 3.")
 
     return {"passed": len(errors) == 0, "errors": errors, "warnings": warnings}

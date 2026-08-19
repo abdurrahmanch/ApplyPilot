@@ -30,12 +30,12 @@ def _para(n: int) -> str:
 
 
 def _good_letter() -> str:
-    # 4 substantial paragraphs, ~370 words, starts with Dear, ends with name.
+    # 3 substantial paragraphs inside the 150-200 word target (section 7),
+    # starts with Dear, ends with name.
     return (
         "Dear Hiring Manager,\n\n"
-        + _para(4) + "\n\n"
-        + _para(6) + "\n\n"
-        + _para(4) + "\n\n"
+        + _para(2) + "\n\n"
+        + _para(3) + "\n\n"
         + _para(2) + "\n\n"
         + "Jordan"
     )
@@ -124,21 +124,32 @@ def test_plain_walkthrough_word_not_banned():
 
 # ── validate_cover_letter: structure ──────────────────────────────────────
 
-def test_two_paragraph_letter_fails_structure():
-    letter = "Dear Hiring Manager,\n\n" + _para(5) + "\n\n" + _para(5) + "\n\nJordan"
+def test_one_paragraph_letter_fails_structure():
+    letter = "Dear Hiring Manager,\n\n" + _para(4) + "\n\nJordan"
     result = validate_cover_letter(letter)
     assert not result["passed"]
     assert any("body paragraph" in e for e in result["errors"]), result["errors"]
 
 
-def test_three_paragraph_letter_passes_with_warning():
+def test_three_paragraph_letter_is_the_target_structure():
     letter = (
         "Dear Hiring Manager,\n\n"
-        + _para(5) + "\n\n" + _para(5) + "\n\n" + _para(4) + "\n\nJordan"
+        + _para(2) + "\n\n" + _para(3) + "\n\n" + _para(2) + "\n\nJordan"
     )
     result = validate_cover_letter(letter)
     assert result["passed"], result["errors"]
-    assert any("3 body paragraphs" in w for w in result["warnings"])
+    assert not any("body paragraph" in w for w in result["warnings"])
+
+
+def test_overlong_letter_is_rejected():
+    """Length is the padding guard: 250-400 words bought repetition."""
+    letter = (
+        "Dear Hiring Manager,\n\n"
+        + _para(6) + "\n\n" + _para(6) + "\n\n" + _para(6) + "\n\nJordan"
+    )
+    result = validate_cover_letter(letter)
+    assert not result["passed"]
+    assert any("Too long" in e for e in result["errors"]), result["errors"]
 
 
 # ── generate_cover_letter ────────────────────────────────────────────────
@@ -186,10 +197,14 @@ def test_unknown_company_marked_unknown_not_aggregator(monkeypatch):
     assert "COMPANY: linkedin" not in user_msg
 
 
-def test_retry_gets_word_count_expansion_feedback(monkeypatch):
+def test_retry_gets_word_count_trim_feedback(monkeypatch):
+    """An overlong draft is told to cut whole sentences, not trim words."""
     from applypilot.scoring import cover_letter as cl
-    short_letter = "Dear Hiring Manager,\n\n" + _para(2) + "\n\nJordan"  # <180 words
-    stub = StubClient([short_letter, GOOD])
+    long_letter = (
+        "Dear Hiring Manager,\n\n"
+        + _para(6) + "\n\n" + _para(6) + "\n\n" + _para(6) + "\n\nJordan"
+    )
+    stub = StubClient([long_letter, GOOD])
     monkeypatch.setattr(cl, "get_client", lambda quality=False: stub)
 
     letter, validation = cl.generate_cover_letter("RESUME", JOB, PROFILE)
@@ -197,7 +212,20 @@ def test_retry_gets_word_count_expansion_feedback(monkeypatch):
     assert len(stub.calls) == 2
     retry_system = stub.calls[1][0]["content"]
     assert "AVOID THESE ISSUES" in retry_system
-    assert "Expand the hook" in retry_system
+    assert "Cut whole sentences" in retry_system
+
+
+def test_retry_gets_word_count_expansion_feedback(monkeypatch):
+    """A truncated draft is told to add a concrete fact, not filler."""
+    from applypilot.scoring import cover_letter as cl
+    short_letter = "Dear Hiring Manager,\n\n" + _para(1) + "\n\nJordan"
+    stub = StubClient([short_letter, GOOD])
+    monkeypatch.setattr(cl, "get_client", lambda quality=False: stub)
+
+    letter, validation = cl.generate_cover_letter("RESUME", JOB, PROFILE)
+    assert validation["passed"]
+    retry_system = stub.calls[1][0]["content"]
+    assert "one more concrete fact" in retry_system
 
 
 def test_exhausted_retries_returns_failed_validation(monkeypatch):
