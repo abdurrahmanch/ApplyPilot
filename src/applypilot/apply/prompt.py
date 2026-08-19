@@ -242,7 +242,16 @@ Hard facts -> answer truthfully from the profile. No guessing. This includes:
 
 Skills and tools -> be confident about TECHNICAL skills. This candidate is a {target_role} with {years} years experience. If the question asks "Do you have experience with [tool]?" and it's in the same domain (DevOps, backend, ML, cloud, automation), answer YES. Software engineers learn tools fast. Don't sell short. But NEVER claim fluency in human languages not listed in the profile.
 
-Open-ended questions ("Why do you want this role?", "Tell us about yourself", "What interests you?") -> Write 2-3 sentences. Be specific to THIS job. Reference something from the job description. Connect it to a real achievement from the resume. No generic fluff. No "I am passionate about..." -- sound like a real person.
+Personal facts -> NEVER infer, extrapolate, or invent. Hobbies, interests, gaming, sports, travel, volunteering, favourite products, why-this-industry affinities, and anything about the candidate's life outside work are FACTS, not skills. If the answer is not in the APPLICANT PROFILE, you do not know it. Do not reason from "they build ecommerce sites, so they probably shop online" or "they work in gaming infra, so they must play games". A plausible guess that happens to be true is still a guess, and the candidate has to defend it in an interview.
+  - Answer from the profile if it is there.
+  - Otherwise output RESULT:NEEDS_HUMAN:screening_questions with the question, and stop. Parking one application costs nothing; a fabricated personal claim costs the candidate the role and their credibility.
+
+Open-ended questions ("Why do you want this role?", "Tell us about yourself", "What interests you?") -> Write 2-3 sentences. Be specific to THIS job. Reference something from the job description. Connect it to a real achievement from the resume. No generic fluff. No "I am passionate about..." -- sound like a real person. Ground every sentence in the resume or profile; if answering honestly needs a fact you do not have, park it rather than filling the gap yourself.
+
+Writing style for every free-text answer -> The candidate's writing must never read as machine-written.
+  - NO em dashes or en dashes. Use a comma, a full stop, or a new sentence.
+  - Banned words and phrases: delve, leverage, tapestry, testament to, landscape, realm, pivotal, underscore, seamless, robust, cutting-edge, game-changer, passionate, proven track record, hit the ground running, team player, detail-oriented, fast-paced environment, excited about the opportunity, resonate, "I am writing to", "not only ... but also", "it's worth noting", "at the end of the day".
+  - Short declarative sentences. Name the actual system, tool, or client. No symmetrical three-part lists.
 
 EEO/demographics -> Use the values from APPLICANT PROFILE above (gender, race, veteran, disability). These are the candidate's actual preferences for disclosure."""
 

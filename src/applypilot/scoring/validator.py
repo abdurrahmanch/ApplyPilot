@@ -44,6 +44,30 @@ CL_BANNED_PATTERNS: list[tuple[str, str]] = [
     ("demonstrate", r"\bdemonstrat\w*\b"),
     ("happy to walk through", r"\bhappy to walk (you\s+)?through\b"),
     ("resonate", r"\bresonat\w*\b"),
+    # AI tells. Abdur-Rahman flagged these directly (2026-08-19): anything that
+    # reads as machine-written gets the application binned, so these force a
+    # regeneration rather than a warning.
+    ("delve", r"\bdelv(e|es|ing|ed)\b"),
+    ("tapestry", r"\btapestr(y|ies)\b"),
+    ("testament to", r"\btestament\s+to\b"),
+    ("leverage", r"\bleverag(e|es|ed|ing)\b"),
+    ("landscape", r"\b(the\s+)?\w+\s+landscape\b"),
+    ("realm", r"\brealm\b"),
+    ("underscore", r"\bunderscor(e|es|ed|ing)\b"),
+    ("pivotal", r"\bpivotal\b"),
+    ("navigate the", r"\bnavigat(e|ing)\s+the\b"),
+    ("in today's world", r"\bin today'?s\s+\w+\s+(world|landscape|market|environment)\b"),
+    ("fast-paced environment", r"\bfast[- ]paced\s+environment\b"),
+    ("hit the ground running", r"\bhit the ground running\b"),
+    ("excited about the opportunity", r"\bexcited about (the\s+)?(this\s+)?opportunit(y|ies)\b"),
+    ("i am writing to express", r"\bi am writing to\b"),
+    ("not only but also", r"\bnot only\b[^.]{0,80}\bbut also\b"),
+    ("it's worth noting", r"\bit'?s worth noting\b"),
+    ("at the end of the day", r"\bat the end of the day\b"),
+    ("game-changer", r"\bgame[- ]chang(er|ing)\b"),
+    ("dive into", r"\bdiv(e|ing)\s+(deep\s+)?into\b"),
+    ("wealth of experience", r"\bwealth of\b"),
+    ("at scale (unearned)", r"\bi'?ve built this at scale\b"),
 ]
 
 LLM_LEAK_PHRASES: list[str] = [
