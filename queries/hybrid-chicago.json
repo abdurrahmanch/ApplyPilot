@@ -1,0 +1,86 @@
+{
+  "locations": [
+    {
+      "id": "kRk1yZQBoEtHp_8UuM0Y",
+      "types": [
+        "locality"
+      ],
+      "address_components": [
+        {
+          "long_name": "Chicago",
+          "short_name": "Chicago",
+          "types": [
+            "locality"
+          ]
+        },
+        {
+          "long_name": "Illinois",
+          "short_name": "IL",
+          "types": [
+            "administrative_area_level_1"
+          ]
+        },
+        {
+          "long_name": "United States",
+          "short_name": "US",
+          "types": [
+            "country"
+          ]
+        }
+      ],
+      "geometry": {
+        "location": {
+          "lat": 41.85003,
+          "lon": -87.65005
+        }
+      },
+      "formatted_address": "Chicago, IL, US",
+      "population": 2696555,
+      "workplace_types": [
+        "Remote",
+        "Hybrid",
+        "Onsite"
+      ],
+      "options": {
+        "radius": 100,
+        "radius_unit": "miles",
+        "ignore_radius": false
+      }
+    },
+    {
+      "types": [
+        "administrative_area_level_1"
+      ],
+      "formatted_address": "Illinois, United States",
+      "address_components": [
+        {
+          "long_name": "Illinois",
+          "short_name": "IL",
+          "types": [
+            "administrative_area_level_1"
+          ]
+        },
+        {
+          "long_name": "United States",
+          "short_name": "US",
+          "types": [
+            "country"
+          ]
+        }
+      ],
+      "workplace_types": [
+        "Remote",
+        "Hybrid",
+        "Onsite"
+      ],
+      "options": {},
+      "id": "Illinois, United Statesadministrative_area_level_1"
+    }
+  ],
+  "dateFetchedPastNDays": 4,
+  "roleYoeRange": [
+    0,
+    5
+  ],
+  "jobTitleQuery": "\"software engineer\",\n\"software developer\",\n\"software development engineer\",\n\"sde\",\n\"software engineer i\",\n\"software engineer ii\",\n\"software engineer 1\",\n\"software engineer 2\",\n\"associate software engineer\",\n\"associate software developer\",\n\"junior software engineer\",\n\"junior software developer\",\n\"entry level software engineer\",\n\"entry-level software engineer\",\n\"entry level software developer\",\n\"entry-level software developer\",\n\"new grad software engineer\",\n\"new graduate software engineer\",\n\"graduate software engineer\",\n\"early career software engineer\",\n\"software engineer, early career\",\n\"software engineer, new grad\",\n\n\"backend engineer\",\n\"backend developer\",\n\"backend software engineer\",\n\"backend software developer\",\n\"back-end engineer\",\n\"back-end developer\",\n\"server-side engineer\",\n\"server-side developer\",\n\"api engineer\",\n\"api developer\",\n\"services engineer\",\n\"platform engineer\",\n\"platform software engineer\",\n\"junior backend engineer\",\n\"associate backend engineer\",\n\n\"java engineer\",\n\"java developer\",\n\"java software engineer\",\n\"java software developer\",\n\"java backend engineer\",\n\"java backend developer\",\n\"java application developer\",\n\"java full stack engineer\",\n\"java full stack developer\",\n\"java full-stack engineer\",\n\"java full-stack developer\",\n\"j2ee developer\",\n\"java ee developer\",\n\n\"spring boot engineer\",\n\"spring boot developer\",\n\"spring engineer\",\n\"spring developer\",\n\"microservices engineer\",\n\"microservices developer\",\n\"distributed systems engineer\",\n\"event-driven systems engineer\",\n\"kafka engineer\",\n\"kafka developer\",\n\"streaming engineer\",\n\"integration engineer\",\n\"integration developer\",\n\"middleware engineer\",\n\"middleware developer\",\n\n\"full stack engineer\",\n\"full stack developer\",\n\"full-stack engineer\",\n\"full-stack developer\",\n\"full stack software engineer\",\n\"full-stack software engineer\",\n\"full stack software developer\",\n\"full-stack software developer\",\n\"javascript full stack developer\",\n\"typescript full stack developer\",\n\"react full stack developer\",\n\"web application engineer\",\n\"web application developer\",\n\n\"front-end engineer\",\n\"front-end developer\",\n\"front end engineer\",\n\"front end developer\",\n\"react engineer\",\n\"react developer\",\n\"nextjs engineer\",\n\"nextjs developer\",\n\"next.js developer\",\n\"ui engineer\",\n\"ui developer\",\n\"web engineer\",\n\"web developer\",\n\n\"cloud software engineer\",\n\"cloud application engineer\",\n\"cloud backend engineer\",\n\"devops engineer\",\n\"devops software engineer\",\n\"infrastructure engineer\",\n\"infrastructure software engineer\",\n\"site reliability engineer\",\n\"reliability engineer\",\n\n\"ai engineer\",\n\"ai software engineer\",\n\"applied ai engineer\",\n\"machine learning engineer\",\n\"ml engineer\",\n\"junior machine learning engineer\",\n\"junior ml engineer\",\n\"llm engineer\",\n\"junior llm engineer\",\n\"ai integration engineer\",\n\"junior nlp engineer\",\n\n\"solutions engineer\",\n\"solutions developer\",\n\"implementation engineer\",\n\"implementation developer\",\n\"technical solutions engineer\",\n\"technology analyst\",\n\"programmer analyst\",\n\"developer analyst\",\n\"application developer\",\n\"application engineer\",\n\"systems software engineer\",\n\"systems developer\",\n\n\"launchpad software engineer\",\n\"technology rotational program\",\n\"software engineering rotational\",\n\"associate developer\",\n\"associate engineer\",\n\"associate integration engineer\",\n\n\"technical business analyst\",\n\"it business analyst\",\n\"systems analyst\",\n\"solutions analyst\",\n\"implementation analyst\""
+}
