@@ -706,6 +706,61 @@ def review(
 
 
 @app.command()
+def otp(
+    once: bool = typer.Option(False, "--once", help="Poll a single time and exit."),
+    interval: int = typer.Option(60, "--interval", help="Seconds between polls."),
+    lookback: int = typer.Option(1, "--lookback-hours",
+                                 help="How far back to search Gmail each poll."),
+) -> None:
+    """Poll Gmail for verification codes and file them for apply workers.
+
+    Runs every 60s during an active apply phase and every 15 minutes otherwise
+    (the systemd timer sets the interval). Codes land in `email_events`, where
+    a worker blocked on account creation picks them up.
+    """
+    _bootstrap()
+
+    import asyncio
+    import time as _time
+
+    from applypilot.database import get_connection
+    from applypilot.tracking.gmail_client import search_application_emails
+    from applypilot.tracking.otp import process_email
+
+    conn = get_connection()
+    # Gmail search is day-granular, so a sub-day lookback still asks for 1 day
+    # and the TTL in otp.py is what actually keeps stale codes out.
+    days = max(1, round(lookback / 24))
+
+    def poll_once() -> int:
+        try:
+            emails = asyncio.run(
+                search_application_emails(days=days, limit=25)) or []
+        except Exception as e:
+            console.print(f"[red]Gmail search failed:[/red] {e}")
+            return 0
+        found = 0
+        for email in emails:
+            if process_email(conn, email):
+                found += 1
+        return found
+
+    if once:
+        console.print(f"[green]{poll_once()} code(s) filed.[/green]")
+        raise typer.Exit(0)
+
+    console.print(f"Polling Gmail for verification codes every {interval}s. Ctrl+C to stop.")
+    try:
+        while True:
+            found = poll_once()
+            if found:
+                console.print(f"[green]{found} code(s) filed.[/green]")
+            _time.sleep(interval)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped.[/dim]")
+
+
+@app.command()
 def parked(
     resolve: int = typer.Option(None, "--resolve", help="Mark a parked entry resolved by id."),
     outcome: str = typer.Option("resolved", "--outcome", help="Outcome to record."),

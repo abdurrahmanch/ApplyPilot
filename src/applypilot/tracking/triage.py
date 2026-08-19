@@ -223,6 +223,18 @@ def triage_email(email: dict) -> TriageResult:
             reason="snippet matches LLM-required pattern",
         )
 
+    # --- Priority 1.5: One-time codes ---
+    # Ahead of noise, because a verification mail from a no-reply address on an
+    # ATS domain looks exactly like noise, and dropping it strands the worker
+    # that is waiting for it (section 12).
+    from applypilot.tracking.otp import looks_like_otp
+    if looks_like_otp(subject, snippet):
+        return TriageResult(
+            classification="otp",
+            confidence=0.95,
+            reason="verification-code pattern",
+        )
+
     # --- Priority 2: Noise ---
     if sender_domain in NOISE_SENDER_DOMAINS:
         return TriageResult(
