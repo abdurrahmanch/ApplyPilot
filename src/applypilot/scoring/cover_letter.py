@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from applypilot.config import COVER_LETTER_DIR, RESUME_PATH, load_profile
 from applypilot.database import get_connection, transition_state, write_with_retry
 from applypilot.llm import get_client
+from applypilot.voice import load_voice_profile
 from applypilot.scoring.validator import (
     sanitize_text,
     validate_cover_letter,
@@ -145,6 +146,15 @@ def generate_cover_letter(
     validation: dict = {"passed": False, "errors": ["no attempts"], "warnings": []}
     client = get_client(quality=True)
     cl_prompt_base = _build_cover_letter_prompt(profile)
+
+    # Abdur-Rahman's voice profile (read-only core + the job-applications
+    # register). Without it the letter is generic rather than wrong, so a
+    # missing profile is a warning, not a failure.
+    voice = load_voice_profile()
+    if voice:
+        cl_prompt_base += (
+            "\n\n## WRITING VOICE (authoritative — overrides the style notes above "
+            "wherever they conflict)\n\n" + voice)
 
     for attempt in range(max_retries + 1):
         # Fresh conversation every attempt

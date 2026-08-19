@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from applypilot.config import RESUME_PATH, TAILORED_DIR, load_profile
 from applypilot.database import get_connection, get_jobs_by_stage, transition_state, write_with_retry
 from applypilot.llm import get_client
+from applypilot.voice import load_voice_profile
 from applypilot.scoring.validator import (
     sanitize_text,
     validate_json_fields,
@@ -407,6 +408,15 @@ def tailor_resume(
     tailored = ""
     client = get_client(quality=True)
     tailor_prompt_base = _build_tailor_prompt(profile)
+
+    # Voice profile: core + job-applications register. Its honest-positioning
+    # rule is load-bearing here — the register bars implementation verbs for
+    # work that only exists as a design.
+    voice = load_voice_profile()
+    if voice:
+        tailor_prompt_base += (
+            "\n\n## WRITING VOICE (authoritative — overrides the style notes above "
+            "wherever they conflict)\n\n" + voice)
 
     for attempt in range(max_retries + 1):
         report["attempts"] = attempt + 1
