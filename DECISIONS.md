@@ -236,3 +236,83 @@ He goes by **Abdur-Rahman**, not "Arch" as this document's section 1 uses, and
 his surname is written **"Ch"** only — deliberately truncated to limit
 doxxing. Never expand it in generated output; park any form demanding a full
 legal surname.
+
+---
+
+## 2026-08-19 — M9 part 1: the gate becomes binding
+
+The review gate was written, tested, and disconnected. Nothing called
+`build_batch`, so no batch was ever assembled; and `acquire_job` selected
+straight from the jobs table, so approving a batch changed nothing about what
+went out. Approval was documentation, not control. Both ends are now wired.
+
+### D9 — A `gate` stage closes the prepare run
+
+`STAGE_ORDER` gains a seventh stage, `gate`, downstream of `pdf`. It calls
+`review.prepare.build_run_batch` and never submits. `applypilot run` therefore
+ends at the human touchpoint by default instead of quietly running past it,
+which is the property the unattended timers in the rest of M9 depend on.
+
+In streaming mode the gate is special-cased: it waits for its upstream to
+finish and then runs exactly once. Treating it like a conveyor stage would
+build one batch per polling pass and split a single run's work across several
+of them.
+
+### D10 — Batch membership is recorded, not inferred
+
+`submittable_applications` derived a batch's membership from `review_items`,
+which inverted the intent in the most common case. An application whose
+questions all auto-answered and whose cover letter raised no delta produces
+zero items — so it was never "in" the batch and could never be cleared. The
+gate blocked exactly the applications it had no objection to.
+
+`migrations/003_review_membership.sql` adds `review_batch_applications`, one
+row per application per batch. `review_items` keeps its narrower job: what
+needs his eyes. Batches predating the table fall back to the old derivation.
+
+### D11 — Sensitive questions are batch-scoped, one per category
+
+Section 9 requires work auth, sponsorship, and salary in every batch forever.
+Read literally — every stored phrasing, against every application — the first
+live run produced 11 items for a single application. At 17 applications that is
+187 confirmations of the same three answers, and the gate's whole design target
+is 15 minutes.
+
+So `sensitive_questions` returns one question per sensitive *category*, and
+`build_batch` files them with `application_id = NULL`. `submittable_applications`
+treats any unresolved application-less item as blocking the entire batch, which
+is what "the answer applies to all of it" actually means. The live batch went
+from 12 items to 4.
+
+### D12 — The gate mirrors `acquire_job`, including the manual-ATS skip
+
+A batch that clears work the submit phase would refuse is a batch that lies.
+The first live run cleared an IMEG Workday role that `acquire_job` then marked
+`manual_only` on sight, because its host is on the manual-ATS skip list. The
+readiness query now applies the same predicate — plus open `parked` rows and
+terminal failure states — and diverts those to one awareness line each.
+
+### D13 — Approval is binding, with two named escape hatches
+
+`acquire_job(require_gate=True)` is the default. With nothing cleared it
+returns None, and `apply.main` refuses before any browser launches, naming
+which of the two reasons applies (no batch built, or one still awaiting him).
+Two bypasses stay open and are deliberate:
+
+- `--no-gate` — explicit, labelled in the launch banner as unreviewed.
+- an explicit `target_url` — naming one job is itself a human decision, and it
+  is the path the crash-reconnect probe uses to finish a job that was already
+  cleared before the run died.
+
+`cleared_urls` unions across every opened batch rather than reading only the
+newest, so a partial batch whose held-back items are resolved later is not
+invalidated by the next run, and an interrupted apply run resumes. A batch is
+marked `submitted` only once every application it cleared has actually gone
+out.
+
+### Cover letters are read from the `.txt` beside the converted file
+
+`cover_letter_path` points at the `.pdf` after the pdf stage rewrites it. The
+gate reads the sibling `.txt`. Without that fallback every batch would have
+shown zero cover deltas and the batch-wide sameness check would never fire —
+silently, since a batch with no cover items looks like a clean batch.

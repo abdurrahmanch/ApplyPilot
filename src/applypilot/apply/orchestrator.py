@@ -148,7 +148,8 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 model: str = "sonnet", dry_run: bool = False,
                 fresh_sessions: bool = False,
                 total_workers: int = 1,
-                no_hitl: bool = False) -> tuple[int, int]:
+                no_hitl: bool = False,
+                require_gate: bool = True) -> tuple[int, int]:
     """Run jobs sequentially until limit is reached or queue is empty.
 
     Args:
@@ -163,6 +164,7 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
         dry_run: Don't click Submit.
         fresh_sessions: Refresh Chrome session cookies before launching.
         total_workers: Total concurrent workers (used for window tiling).
+        require_gate: Only acquire jobs an approved review batch has cleared.
 
     Returns:
         Tuple of (applied_count, failed_count).
@@ -187,6 +189,7 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
             worker_id, limit, target_url, min_score, max_score, max_age_days,
             headless, model, dry_run, fresh_sessions, applied, failed, continuous,
             jobs_done, empty_polls, port, total_workers, no_hitl=no_hitl,
+            require_gate=require_gate,
         )
     finally:
         _stop_worker_listener(worker_id)
@@ -246,6 +249,7 @@ def _worker_loop_body(
     applied: int, failed: int, continuous: bool,
     jobs_done: int, empty_polls: int, port: int,
     total_workers: int = 1, no_hitl: bool = False,
+    require_gate: bool = True,
 ) -> tuple[int, int]:
     """Main per-worker processing loop."""
     from applypilot.apply.launcher import (
@@ -272,7 +276,7 @@ def _worker_loop_body(
 
         job = acquire_job(target_url=_effective_target, min_score=min_score,
                           max_score=max_score, max_age_days=max_age_days,
-                          worker_id=worker_id)
+                          worker_id=worker_id, require_gate=require_gate)
         if not job:
             if not continuous:
                 add_event(f"[W{worker_id}] Queue empty")
@@ -686,7 +690,7 @@ def main(limit: int = 1, target_url: str | None = None,
          dry_run: bool = False, continuous: bool = False,
          poll_interval: int = 60, workers: int = 1,
          fresh_sessions: bool = False, no_hitl: bool = False,
-         no_focus: bool = False) -> None:
+         no_focus: bool = False, require_gate: bool = True) -> None:
     """Launch the apply pipeline.
 
     Args:
@@ -704,6 +708,7 @@ def main(limit: int = 1, target_url: str | None = None,
         fresh_sessions: Refresh Chrome session cookies from user's real profile.
         no_hitl: Skip human-in-the-loop waits; park jobs as needs_human and move on.
         no_focus: Prevent Chrome windows from stealing keyboard focus (Linux/GNOME only).
+        require_gate: Only submit applications an approved review batch cleared.
     """
     from applypilot.apply.launcher import (
         _stop_event, _claude_lock, _claude_procs, _qa_queue,
@@ -745,6 +750,25 @@ def main(limit: int = 1, target_url: str | None = None,
         commit_with_retry(_boot_conn)
         console.print(f"[yellow]Re-queued {_nh_count} needs_human job(s) from previous session[/yellow]")
         logger.info("Startup: re-queued %d needs_human jobs from previous session", _nh_count)
+
+    # The gate is checked once here as well as per-acquisition. Workers that
+    # find nothing cleared would each spin up Chrome, poll an empty queue, and
+    # exit — expensive and confusing. Failing before any browser launches makes
+    # the reason obvious.
+    if require_gate and not target_url:
+        from applypilot.review.batch import gate_state
+        gate = gate_state(_boot_conn)
+        if not gate["open"]:
+            console.print(f"[red]Review gate is shut:[/red] {gate['reason']}")
+            console.print(
+                "Nothing is submitted until a batch is approved. "
+                "Use [bold]--no-gate[/bold] only when you mean to bypass review."
+            )
+            return
+        console.print(
+            f"[green]Review gate open:[/green] {len(gate['cleared'])} "
+            "application(s) cleared for submission."
+        )
 
     if continuous:
         effective_limit = 0
@@ -834,6 +858,7 @@ def main(limit: int = 1, target_url: str | None = None,
                         fresh_sessions=fresh_sessions,
                         total_workers=workers,
                         no_hitl=no_hitl,
+                        require_gate=require_gate,
                     ): i
                     for i in range(workers)
                 }
@@ -889,6 +914,14 @@ def main(limit: int = 1, target_url: str | None = None,
             _dashboard_running = False
             refresh_thread.join(timeout=2)
             live.update(render_full())
+
+        if require_gate:
+            try:
+                from applypilot.review.batch import close_completed_batches
+                for closed_id in close_completed_batches(get_connection()):
+                    console.print(f"[dim]Review batch {closed_id} fully submitted.[/dim]")
+            except Exception as e:
+                logger.warning("Could not close out review batches: %s", e)
 
         totals = get_totals()
         console.print(

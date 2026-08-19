@@ -62,7 +62,7 @@ def test_acquire_skips_job_when_other_row_already_applied(
         fit_score=10, company="overstory",
     )
 
-    job = acquire_job(min_score=10, max_age_days=0)
+    job = acquire_job(min_score=10, max_age_days=0, require_gate=False)
     assert job is None, (
         "Expected no acquireable jobs — the only candidate's "
         "application_url is already in flight on a sibling row, "
@@ -92,7 +92,7 @@ def test_acquire_skips_when_other_row_in_progress(tmp_db, seed_job, monkeypatch)
         fit_score=10, company="temporal",
     )
 
-    assert acquire_job(min_score=10, max_age_days=0) is None
+    assert acquire_job(min_score=10, max_age_days=0, require_gate=False) is None
 
 
 def test_acquire_does_not_block_self(tmp_db, seed_job, monkeypatch):
@@ -109,7 +109,7 @@ def test_acquire_does_not_block_self(tmp_db, seed_job, monkeypatch):
         apply_status=None,
         fit_score=10, company="acme",
     )
-    job = acquire_job(min_score=10, max_age_days=0)
+    job = acquire_job(min_score=10, max_age_days=0, require_gate=False)
     assert job is not None, "Solo candidate must be acquireable"
     assert job["url"] == "https://www.linkedin.com/jobs/view/solo"
 
@@ -138,7 +138,7 @@ def test_acquire_skips_jobs_with_null_application_url(
         fit_score=10, company="acme",
     )
 
-    assert acquire_job(min_score=10, max_age_days=0) is None
+    assert acquire_job(min_score=10, max_age_days=0, require_gate=False) is None
 
 
 def test_acquire_picks_valid_when_others_are_null(
@@ -172,7 +172,7 @@ def test_acquire_picks_valid_when_others_are_null(
         fit_score=10, company="acme",
     )
 
-    job = acquire_job(min_score=10, max_age_days=0)
+    job = acquire_job(min_score=10, max_age_days=0, require_gate=False)
     assert job is not None
     assert job["url"] == "https://www.linkedin.com/jobs/view/good"
 
@@ -217,7 +217,7 @@ def test_acquire_prefers_unapplied_company_over_higher_score(
         fit_score=9,
     )
 
-    job = acquire_job(min_score=8, max_age_days=0)
+    job = acquire_job(min_score=8, max_age_days=0, require_gate=False)
     assert job is not None
     assert job["url"].endswith("/beta-pending"), (
         f"Expected the beta (0-applied) candidate to win over the "
@@ -249,6 +249,6 @@ def test_acquire_falls_back_to_higher_score_when_in_flight_tied(
         fit_score=10,
     )
 
-    job = acquire_job(min_score=8, max_age_days=0)
+    job = acquire_job(min_score=8, max_age_days=0, require_gate=False)
     assert job is not None
     assert job["url"].endswith("/beta-10")

@@ -79,11 +79,19 @@ def _summary(batch: dict) -> Table:
 
 
 def _render_question(payload: dict) -> Panel:
+    # Batch-scoped questions (work auth, sponsorship, salary) are asked once
+    # and answered for everything going out, so naming one employer would be a
+    # lie about what the answer covers.
+    if payload.get("scope") == "batch":
+        scope_lines = ["applies to: every application in this batch"]
+    else:
+        scope_lines = [f"company:  {payload.get('company') or '?'}",
+                       f"role:     {payload.get('title') or '?'}"]
+
     lines = [
         f"[bold]{payload.get('question', '(no text)')}[/bold]",
         "",
-        f"company:  {payload.get('company') or '?'}",
-        f"role:     {payload.get('title') or '?'}",
+        *scope_lines,
         "",
         f"[bold]proposed:[/bold] {payload.get('proposed_answer') or '(none — needs an answer)'}",
         f"[dim]{payload.get('reason', '')}[/dim]",
@@ -135,7 +143,11 @@ def _render(item: dict) -> Panel:
     return _render_awareness(kind, payload)
 
 
-def _keys_for(kind: str) -> str:
+def _keys_for(kind: str, scope: str = "application") -> str:
+    if scope == "batch":
+        # Skipping or parking a batch-wide question would silently apply to
+        # every application, so those keys are not offered here.
+        return "[a]pprove [e]dit [q]uit"
     if kind == "cover_delta":
         return "[a]pprove [e]dit-note [f]ull [s]kip [p]ark [q]uit"
     if kind in AWARENESS_ONLY:
@@ -170,7 +182,14 @@ def review_batch(conn: sqlite3.Connection, batch_id: int | None = None) -> dict:
         console.print(_render(item))
 
         while True:
-            choice = Prompt.ask(_keys_for(kind), default="a").strip().lower()[:1]
+            scope = item["payload"].get("scope", "application")
+            choice = Prompt.ask(_keys_for(kind, scope),
+                                default="a").strip().lower()[:1]
+
+            if choice in ("s", "p") and scope == "batch":
+                console.print("[dim]Not available on a batch-wide question — "
+                              "answer it, or [q]uit and come back.[/dim]")
+                continue
 
             if choice == "q":
                 console.print("[dim]Stopped. Nothing submitted; the rest stay pending.[/dim]")

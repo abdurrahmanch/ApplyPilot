@@ -1432,16 +1432,24 @@ def acquire_job(target_url: str | None = None,
                 min_score: int | None = None,
                 max_score: int | None = None,
                 max_age_days: int | None = None,
-                worker_id: int = 0) -> dict | None:
+                worker_id: int = 0,
+                require_gate: bool = True) -> dict | None:
     """Atomically acquire the next job to apply to.
 
     Enforces:
+      - Review-gate approval: only applications an approved batch cleared
       - Minimum fit score (config.DEFAULTS["min_score"] default)
       - Job age cutoff (config.DEFAULTS["max_job_age_days"] default)
       - Per-company open-pipeline cap (YAML-configurable)
       - Per-company concurrency: at most 1 active worker per company
       - Per-ATS concurrency: at most 1 active worker per ATS family
       - Manual-ATS skip list
+
+    The gate is binding, not advisory: with `require_gate` set and nothing
+    cleared, this returns None and no worker submits anything. An explicit
+    `target_url` bypasses it — naming one job is itself a human decision, and
+    it is the path the crash-reconnect probe uses to finish a job that was
+    already cleared before the run died.
     """
     from applypilot import config as _cfg
     from datetime import datetime, timedelta, timezone
@@ -1512,6 +1520,16 @@ def acquire_job(target_url: str | None = None,
             """, (target_url, target_url, like, like,
                   target_url, target_url)).fetchone()
         else:
+            cleared: set[str] | None = None
+            if require_gate:
+                from applypilot.review.batch import gate_state
+                gate = gate_state(conn)
+                if not gate["open"]:
+                    conn.rollback()
+                    logger.warning("Review gate is shut: %s", gate["reason"])
+                    return None
+                cleared = gate["cleared"]
+
             blocked_sites, blocked_patterns = _load_blocked()
             site_filter = " AND ".join(f"site != '{s}'" for s in blocked_sites) if blocked_sites else "1=1"
             url_filter = " AND ".join(f"url NOT LIKE '{p}'" for p in blocked_patterns) if blocked_patterns else "1=1"
@@ -1555,6 +1573,15 @@ def acquire_job(target_url: str | None = None,
             # eligible to fire after the first applies. Skip any candidate
             # whose application_url matches another row that's already in
             # flight (applied, in_progress, or needs_human).
+            # Review-gate filter. Applied in SQL rather than after the fact:
+            # the query is LIMIT 100, so filtering afterwards would silently
+            # drop cleared applications that sort below the hundredth row.
+            gate_filter = ""
+            gate_params: list = []
+            if cleared is not None:
+                gate_filter = f"AND j.url IN ({','.join('?' * len(cleared))})"
+                gate_params = sorted(cleared)
+
             candidates = conn.execute(f"""
                 SELECT j.url, j.title, j.site, j.application_url,
                        j.tailored_resume_path, j.fit_score, j.location,
@@ -1568,6 +1595,7 @@ def acquire_job(target_url: str | None = None,
                   AND j.application_url IS NOT NULL
                   AND j.application_url != ''
                   AND (j.eligibility IS NULL OR j.eligibility = 'eligible')
+                  {gate_filter}
                   {max_score_filter}
                   AND {site_filter}
                   AND {url_filter}
@@ -1583,7 +1611,7 @@ def acquire_job(target_url: str | None = None,
                   )
                 ORDER BY j.fit_score DESC, j.discovered_at DESC, j.url
                 LIMIT 100
-            """, (min_score, *company_excl_params, *age_params)).fetchall()
+            """, (min_score, *gate_params, *company_excl_params, *age_params)).fetchall()
 
             # Build in-flight buckets once, reuse for every candidate.
             # Use resolve_company_key so Greenhouse/Workday jobs (NULL company,

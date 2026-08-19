@@ -27,7 +27,7 @@ console = Console()
 log = logging.getLogger(__name__)
 
 # Valid pipeline stages (in execution order)
-VALID_STAGES = ("discover", "enrich", "score", "tailor", "cover", "pdf")
+VALID_STAGES = ("discover", "enrich", "score", "tailor", "cover", "pdf", "gate")
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ def run(
         help="List available discovery sources and exit.",
     ),
 ) -> None:
-    """Run pipeline stages: discover, enrich, score, tailor, cover, pdf."""
+    """Run pipeline stages: discover, enrich, score, tailor, cover, pdf, gate."""
     # Handle --list-sources before bootstrap (no DB/env needed)
     if list_sources:
         from applypilot.pipeline import DISCOVERY_SOURCES, _SOURCE_ALIASES
@@ -205,6 +205,7 @@ def apply(
     mark_applied: Optional[str] = typer.Option(None, "--mark-applied", help="Manually mark a job URL as applied."),
     fresh_sessions: bool = typer.Option(False, "--fresh-sessions", help="Refresh Chrome session cookies from your real profile before launching."),
     no_hitl: bool = typer.Option(False, "--no-hitl", help="Skip HITL waits: park needs_human jobs and move on. Use for overnight runs."),
+    no_gate: bool = typer.Option(False, "--no-gate", help="Bypass the review gate. Submits applications nobody approved — for debugging only."),
     no_focus: bool = typer.Option(False, "--no-focus", help="Prevent Chrome windows from stealing keyboard focus (Linux/GNOME only). Windows stay visible but won't interrupt your active app."),
     mark_failed: Optional[str] = typer.Option(None, "--mark-failed", help="Manually mark a job URL as failed (provide URL)."),
     fail_reason: Optional[str] = typer.Option(None, "--fail-reason", help="Reason for --mark-failed."),
@@ -336,6 +337,8 @@ def apply(
     console.print(f"  Model:    {model}")
     console.print(f"  Headless: {headless}")
     console.print(f"  Dry run:  {dry_run}")
+    if no_gate:
+        console.print("  Gate:     [red]BYPASSED — nothing here has been reviewed[/red]")
     if fresh_sessions:
         console.print("  Sessions: [yellow]refreshing from real Chrome profile[/yellow]")
     if url:
@@ -356,6 +359,7 @@ def apply(
         fresh_sessions=fresh_sessions,
         no_hitl=no_hitl,
         no_focus=no_focus,
+        require_gate=not no_gate,
     )
 
 

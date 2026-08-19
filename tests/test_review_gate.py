@@ -23,13 +23,14 @@ from applypilot.review.batch import (
     unresolved_items,
 )
 
-MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "001_question_bank.sql"
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 
 def _db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    conn.executescript(MIGRATION.read_text())
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        conn.executescript(path.read_text())
     return conn
 
 

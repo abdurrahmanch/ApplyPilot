@@ -1,6 +1,6 @@
 # PROGRESS.md — session handoff
 
-**Last updated:** 2026-08-19, end of first build session.
+**Last updated:** 2026-08-19, end of second build session.
 **Read this with `CLAUDE.md` (architecture) and `DECISIONS.md` (why things are
 the way they are).** Where this file and CLAUDE.md disagree about how the world
 works, this file is newer — CLAUDE.md was written before the code was read.
@@ -20,9 +20,9 @@ works, this file is newer — CLAUDE.md was written before the code was read.
 | M6 review gate | **done** | `applypilot review`, full escalation logic |
 | M7 apply hardening | **done** | Pacing, parking, proof, per-ATS cooldowns |
 | M8 Gmail + OTP | **code done, BLOCKED on auth** | See blockers |
-| M9 timers + reports | **not started** | Next thing to build |
+| M9 timers + reports | **in progress** | Gate wired end to end; timers + reports next |
 
-**Tests: 485 passed, 3 skipped.** Run with:
+**Tests: 508 passed, 3 skipped.** Run with:
 ```bash
 .venv/bin/python -m pytest -q tests --ignore=tests/test_extension_server.py
 ```
@@ -34,27 +34,56 @@ Developer, via Paylocity. Confirmed "Application Successful".
 
 ---
 
-## Do this next (M9)
+## Done this session — the gate is now binding
+
+The two wire-ups that made the gate advisory are closed. See DECISIONS.md
+D9-D13 for why each is shaped the way it is.
+
+- **`gate` is a pipeline stage** (`STAGE_ORDER[-1]`, downstream of `pdf`). It
+  calls `review.prepare.build_run_batch` and never submits, so
+  `applypilot run` now ends at the human touchpoint instead of past it.
+  `applypilot run gate` runs it alone.
+- **`acquire_job(require_gate=True)` is the default.** Nothing cleared means
+  nothing acquired, and `apply` refuses before launching a browser. Bypasses:
+  `--no-gate` (labelled in the banner) and an explicit `--url`.
+- **`review/prepare.py`** is the new seam between the pipeline and the gate:
+  ready / disqualified / parked, with the readiness predicate mirroring
+  `acquire_job` — manual-ATS URLs, open `parked` rows, and terminal failure
+  states are all diverted to awareness lines rather than cleared.
+- **`migrations/003_review_membership.sql`** records batch membership
+  explicitly. Without it a flawless application (no questions escalated, no
+  cover delta) raised zero `review_items` and could never be cleared.
+- **Sensitive questions are batch-scoped, one per category.** Filed with
+  `application_id = NULL`; an unresolved one blocks the whole batch. This took
+  the first live batch from 12 items to 4.
+- **23 new tests** in `tests/test_gate_wiring.py`.
+
+Live check on his DB: the one prepared job (IMEG, Workday) is on the
+manual-ATS skip list, so the queue is honestly empty — `acquire_job` would
+have refused it anyway. Batch 2 exists and is pending; it holds three
+sensitive confirmations and one cover delta. Nothing has been approved.
+
+## Do this next (rest of M9)
 
 1. **systemd user timers.**
-   - `jobpipe-prepare.timer` — Mon/Wed/Fri early morning. Runs discover →
-     enrich → score → tailor → cover, then calls `review.build_batch()` and
-     exits. It must NEVER submit.
+   - `jobpipe-prepare.timer` — Mon/Wed/Fri early morning. Runs
+     `applypilot run` (which now ends at `gate`) and exits. It must NEVER
+     submit; that property is now enforced in code, not just by convention.
    - `jobpipe-otp-poller.timer` — every 60s during an apply phase, every 15min
      otherwise (see `applypilot otp --interval`).
    - Submission stays manual: `applypilot apply` after gate approval.
-2. **Wire `build_batch` into the prepare run.** The gate exists and is tested,
-   but nothing calls `build_batch()` yet — the pipeline still ends after the
-   cover stage. This is the single most important remaining wire-up.
-3. **Gate `apply` on batch approval.** `submittable_applications()` returns the
-   cleared URLs; `apply` currently ignores it and selects straight from the
-   jobs table. Until this is wired, the gate is advisory rather than binding.
-4. **Run reports.** Plain text per run: discovered N, deduped N, gated N,
+2. **Run reports.** Plain text per run: discovered N, deduped N, gated N,
    prepared N, review items by kind; after approval, submitted N, parked N with
    reasons, per-ATS outcomes. `apply/pacing.ats_health()` already computes the
-   per-ATS part.
-5. **JSONL logs per stage** in `logs/`. The run report is the summary; the
+   per-ATS part, and `review.prepare.build_run_batch` already returns the
+   prepared/gated counts.
+3. **JSONL logs per stage** in `logs/`. The run report is the summary; the
    JSONL is the truth.
+4. **Anticipated questions are only as good as `question_sightings`.** That
+   table is still nearly empty, so per-application questions almost never
+   surface at the gate and novel ones land at apply time via HITL instead.
+   This corrects itself as real applications run; do not "fix" it by widening
+   what the gate guesses.
 
 ---
 

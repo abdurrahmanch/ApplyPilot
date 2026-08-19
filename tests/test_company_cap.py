@@ -122,7 +122,7 @@ def test_acquire_job_blocks_over_cap(tmp_db, seed_job, monkeypatch, tmp_path):
     monkeypatch.setattr(config, "APP_DIR", tmp_path)
     config._company_limits_cache = None
 
-    result = launcher.acquire_job(min_score=8, worker_id=99)
+    result = launcher.acquire_job(min_score=8, worker_id=99, require_gate=False)
     assert result is None, "acme is over cap, nothing should be acquired"
 
 
@@ -146,7 +146,7 @@ overrides:
 """.strip(), encoding="utf-8")
     config._company_limits_cache = None
 
-    assert launcher.acquire_job(min_score=8, worker_id=99) is None
+    assert launcher.acquire_job(min_score=8, worker_id=99, require_gate=False) is None
 
 
 def test_acquire_job_null_company_exempt(tmp_db, seed_job, monkeypatch, tmp_path):
@@ -160,7 +160,7 @@ def test_acquire_job_null_company_exempt(tmp_db, seed_job, monkeypatch, tmp_path
     monkeypatch.setattr(config, "APP_DIR", tmp_path)
     config._company_limits_cache = None
 
-    result = launcher.acquire_job(min_score=8, worker_id=99)
+    result = launcher.acquire_job(min_score=8, worker_id=99, require_gate=False)
     assert result is not None
     assert "hn-post" in result["url"]
 
@@ -182,7 +182,7 @@ overrides:
 """.strip(), encoding="utf-8")
     config._company_limits_cache = None
 
-    assert launcher.acquire_job(min_score=8, worker_id=99) is None
+    assert launcher.acquire_job(min_score=8, worker_id=99, require_gate=False) is None
 
 
 def test_acquire_job_stale_filter(tmp_db, seed_job, monkeypatch, tmp_path):
@@ -196,4 +196,4 @@ def test_acquire_job_stale_filter(tmp_db, seed_job, monkeypatch, tmp_path):
     monkeypatch.setattr(config, "APP_DIR", tmp_path)
     config._company_limits_cache = None
 
-    assert launcher.acquire_job(min_score=8, max_age_days=14, worker_id=99) is None
+    assert launcher.acquire_job(min_score=8, max_age_days=14, worker_id=99, require_gate=False) is None

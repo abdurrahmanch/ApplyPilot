@@ -54,7 +54,7 @@ def _setup_file_logging(stages: list[str]) -> logging.FileHandler | None:
 # Stage definitions
 # ---------------------------------------------------------------------------
 
-STAGE_ORDER = ("discover", "enrich", "score", "tailor", "cover", "pdf")
+STAGE_ORDER = ("discover", "enrich", "score", "tailor", "cover", "pdf", "gate")
 
 STAGE_META: dict[str, dict] = {
     "discover": {"desc": "Job discovery (JobSpy + Workday + smart extract + HN)"},
@@ -63,6 +63,7 @@ STAGE_META: dict[str, dict] = {
     "tailor":   {"desc": "Resume tailoring (LLM + validation)"},
     "cover":    {"desc": "Cover letter generation"},
     "pdf":      {"desc": "PDF conversion (tailored resumes + cover letters)"},
+    "gate":     {"desc": "Review batch assembly (prepare ends here; never submits)"},
 }
 
 # Upstream dependency: a stage only finishes when its upstream is done AND
@@ -74,6 +75,7 @@ _UPSTREAM: dict[str, str | None] = {
     "tailor":   "score",
     "cover":    "tailor",
     "pdf":      "cover",
+    "gate":     "pdf",
 }
 
 
@@ -368,6 +370,41 @@ def _run_pdf(doc_format: str = "docx") -> dict:
         return {"status": f"error: {e}"}
 
 
+def _run_gate(min_score: int | None = None,
+              max_age_days: int | None = None,
+              limit: int | None = None) -> dict:
+    """Stage: assemble the review batch. The prepare run ends here.
+
+    This stage NEVER submits. It exists so that an unattended run stops at the
+    one human touchpoint instead of quietly running past it — which is what the
+    pipeline did before this stage existed, leaving `build_batch` written,
+    tested, and never called.
+    """
+    from applypilot.config import DEFAULTS
+    if min_score is None:
+        min_score = DEFAULTS["min_score"]
+    if max_age_days is None:
+        max_age_days = DEFAULTS["max_job_age_days"]
+    try:
+        from applypilot.review.prepare import build_run_batch
+        summary = build_run_batch(get_connection(), min_score=min_score,
+                                  max_age_days=max_age_days, limit=limit)
+        counts = summary["counts"]
+        if summary["batch_id"] is None:
+            console.print("  [dim]Nothing prepared — no review batch built.[/dim]")
+        else:
+            console.print(
+                f"  Review batch [bold]{summary['batch_id']}[/bold]: "
+                f"{counts['ready']} ready, {counts['disqualified']} disqualified, "
+                f"{counts['parked']} parked, {summary['items']} item(s) to review."
+            )
+            console.print("  Run [bold]applypilot review[/bold] to open the gate.")
+        return {"status": "ok", **summary}
+    except Exception as e:
+        log.exception("Review batch assembly failed: %s", e)
+        return {"status": f"error: {e}"}
+
+
 # Map stage names to their runner functions
 _STAGE_RUNNERS: dict[str, callable] = {
     "discover": _run_discover,
@@ -376,6 +413,7 @@ _STAGE_RUNNERS: dict[str, callable] = {
     "tailor":   _run_tailor,
     "cover":    _run_cover,
     "pdf":      _run_pdf,
+    "gate":     _run_gate,
 }
 
 
@@ -529,8 +567,10 @@ def _run_stage_streaming(
         kwargs["workers"] = workers
     if stage == "discover" and sources is not None:
         kwargs["sources"] = sources
-    if stage in ("score", "tailor", "cover"):
+    if stage in ("score", "tailor", "cover", "gate"):
         kwargs["max_age_days"] = max_age_days
+    if stage == "gate":
+        kwargs["min_score"] = min_score
 
     upstream = _UPSTREAM[stage]
 
@@ -539,6 +579,23 @@ def _run_stage_streaming(
         try:
             result = runner(**kwargs)
             tracker.mark_done(stage, result)
+        except Exception as e:
+            log.exception("Stage '%s' crashed", stage)
+            tracker.mark_done(stage, {"status": f"error: {e}"})
+        return
+
+    if stage == "gate":
+        # The gate is a closing act, not a conveyor: it runs exactly once, and
+        # only after everything upstream has stopped producing. Running it per
+        # pass would build a batch per pass and split one run's work across
+        # several of them.
+        while not tracker.is_done(upstream) and not stop_event.is_set():
+            tracker.wait(upstream, timeout=_STREAM_POLL_INTERVAL)
+        if stop_event.is_set():
+            tracker.mark_done(stage, {"status": "skipped"})
+            return
+        try:
+            tracker.mark_done(stage, runner(**kwargs))
         except Exception as e:
             log.exception("Stage '%s' crashed", stage)
             tracker.mark_done(stage, {"status": f"error: {e}"})
@@ -632,8 +689,10 @@ def _run_sequential(
                 kwargs["workers"] = workers
             if name == "discover" and sources is not None:
                 kwargs["sources"] = sources
-            if name in ("score", "tailor", "cover"):
+            if name in ("score", "tailor", "cover", "gate"):
                 kwargs["max_age_days"] = max_age_days
+            if name == "gate":
+                kwargs["min_score"] = min_score
             result = runner(**kwargs)
             elapsed = time.time() - t0
 

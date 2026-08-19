@@ -103,8 +103,24 @@ def _cover_delta(letter: str) -> dict:
     }
 
 
+def _add_member(conn: sqlite3.Connection, batch_id: int, app: dict) -> None:
+    """Record that an application belongs to this batch.
+
+    Every prepared application gets a row, including the clean ones that raise
+    no review items at all. Without this, a flawless application is invisible
+    to `submittable_applications` and the gate blocks it forever.
+    """
+    conn.execute(
+        "INSERT OR REPLACE INTO review_batch_applications "
+        "(batch_id, application_id, status, title, company, reason, added_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (batch_id, app.get("url"), app.get("status", "ready"),
+         app.get("title"), app.get("company"), app.get("reason"), _now()))
+
+
 def build_batch(conn: sqlite3.Connection, applications: list[dict],
-                run_date: str | None = None) -> int:
+                run_date: str | None = None,
+                batch_questions: list[str] | None = None) -> int:
     """Assemble one pending review batch and return its id.
 
     Args:
@@ -113,6 +129,10 @@ def build_batch(conn: sqlite3.Connection, applications: list[dict],
             questions (list of raw question strings),
             status ('ready'|'disqualified'|'parked'),
             reason (str, for disqualified/parked).
+        batch_questions: questions whose answer is the same for every
+            application in the batch — work authorisation, sponsorship,
+            salary. Raised once, against no application, and blocking all of
+            them until answered.
 
     Escalation is decided here, not in the TUI, so the same rules apply
     whatever renders them.
@@ -122,12 +142,27 @@ def build_batch(conn: sqlite3.Connection, applications: list[dict],
         (run_date or _now(),))
     batch_id = cur.lastrowid
 
+    for raw_question in batch_questions or []:
+        decision = decide(conn, raw_question)
+        match = decision.get("match") or {}
+        _add_item(conn, batch_id, "never_auto_guess", None, {
+            "question": raw_question,
+            "proposed_answer": decision.get("answer"),
+            "reason": decision.get("reason"),
+            "similarity": round(match.get("similarity", 0.0), 3),
+            "question_id": match.get("id"),
+            "matched_canonical": match.get("canonical_text"),
+            "category": match.get("category"),
+            "scope": "batch",
+        })
+
     letters: dict[str, str] = {}
 
     for app in applications:
         url = app.get("url")
         company = app.get("company")
         status = app.get("status", "ready")
+        _add_member(conn, batch_id, app)
 
         if status == "disqualified":
             _add_item(conn, batch_id, "disqualified", url,
@@ -288,14 +323,131 @@ def approve_batch(conn: sqlite3.Connection, batch_id: int,
             "submittable": submittable, "held_back": held_back}
 
 
+# Batch states in which approval has already happened. Everything else means
+# the gate is still shut for that batch.
+OPENED_STATES = ("approved", "partial", "submitted")
+
+
+def batch_members(conn: sqlite3.Connection, batch_id: int) -> list[dict]:
+    """Every application in a batch, whatever its status.
+
+    Falls back to deriving membership from `review_items` for batches written
+    before the membership table existed.
+    """
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM review_batch_applications WHERE batch_id = ? "
+        "ORDER BY application_id", (batch_id,))]
+    if rows:
+        return rows
+
+    batch = get_batch(conn, batch_id)
+    if batch is None:
+        return []
+    derived: dict[str, dict] = {}
+    for item in batch["items"]:
+        url = item["application_id"]
+        if not url:
+            continue
+        status = item["kind"] if item["kind"] in ("disqualified", "parked") else "ready"
+        existing = derived.get(url)
+        if existing is None or existing["status"] == "ready":
+            derived[url] = {"batch_id": batch_id, "application_id": url,
+                            "status": status,
+                            "title": item["payload"].get("title"),
+                            "company": item["payload"].get("company"),
+                            "reason": item["payload"].get("reason")}
+    return sorted(derived.values(), key=lambda m: m["application_id"])
+
+
 def submittable_applications(conn: sqlite3.Connection, batch_id: int) -> list[str]:
     """Application URLs cleared to submit: in the batch, with nothing unresolved."""
     batch = get_batch(conn, batch_id)
-    if batch is None or batch["status"] not in ("approved", "partial", "submitted"):
+    if batch is None or batch["status"] not in OPENED_STATES:
         return []
 
-    blocked = {i["application_id"] for i in unresolved_items(batch)}
-    everyone = {i["application_id"] for i in batch["items"] if i["application_id"]}
-    skipped = {i["application_id"] for i in batch["items"]
-               if i["kind"] in ("disqualified", "parked")}
-    return sorted(everyone - blocked - skipped)
+    outstanding = unresolved_items(batch)
+    # An item raised against no application is a batch-wide confirmation —
+    # work authorisation, sponsorship, salary. Until it is answered, nothing in
+    # the batch is cleared, because the answer applies to all of it.
+    if any(i["application_id"] is None for i in outstanding):
+        return []
+
+    blocked = {i["application_id"] for i in outstanding}
+    ready = {m["application_id"] for m in batch_members(conn, batch_id)
+             if m["status"] == "ready"}
+    return sorted(ready - blocked)
+
+
+def cleared_urls(conn: sqlite3.Connection) -> set[str]:
+    """Every application any opened batch has cleared for submission.
+
+    The union across batches, not just the newest one: a partial batch whose
+    held-back items are resolved later must not be invalidated by the next
+    run's batch, and an interrupted apply run must be resumable.
+    """
+    urls: set[str] = set()
+    for row in conn.execute(
+            "SELECT id FROM review_batches WHERE status IN (?, ?, ?)",
+            OPENED_STATES):
+        urls.update(submittable_applications(conn, row["id"]))
+    return urls
+
+
+def gate_state(conn: sqlite3.Connection) -> dict:
+    """What the submit phase needs to know before it acquires anything.
+
+    Returns ``{"open": bool, "cleared": set[str], "reason": str}``. The gate is
+    shut whenever nothing has been cleared, and the reason distinguishes the
+    two ways that happens — no batch was ever built, or one was built and is
+    still waiting on him — because the fix is different for each.
+    """
+    cleared = cleared_urls(conn)
+    if cleared:
+        return {"open": True, "cleared": cleared, "reason": ""}
+
+    pending = conn.execute(
+        "SELECT id FROM review_batches WHERE status = 'pending' "
+        "ORDER BY id DESC LIMIT 1").fetchone()
+    if pending is not None:
+        return {"open": False, "cleared": cleared,
+                "reason": f"batch {pending['id']} is still awaiting review "
+                          "(run `applypilot review`)"}
+
+    any_batch = conn.execute("SELECT COUNT(*) FROM review_batches").fetchone()[0]
+    if not any_batch:
+        return {"open": False, "cleared": cleared,
+                "reason": "no review batch has been built "
+                          "(run `applypilot run gate`)"}
+    return {"open": False, "cleared": cleared,
+            "reason": "every reviewed application is held back or already submitted"}
+
+
+def mark_batch_submitted(conn: sqlite3.Connection, batch_id: int) -> None:
+    """Close out a batch after its cleared applications have been attempted."""
+    conn.execute(
+        "UPDATE review_batches SET status = 'submitted' WHERE id = ? "
+        "AND status IN ('approved', 'partial')", (batch_id,))
+    conn.commit()
+
+
+def close_completed_batches(conn: sqlite3.Connection) -> list[int]:
+    """Mark every open batch whose cleared applications have all gone out.
+
+    Called at the end of a submit run. A batch with anything still unsubmitted
+    stays open, so an interrupted run resumes from where it stopped instead of
+    needing a second trip through the gate.
+    """
+    closed: list[int] = []
+    for row in conn.execute(
+            "SELECT id FROM review_batches WHERE status IN ('approved', 'partial')"):
+        cleared = submittable_applications(conn, row["id"])
+        if not cleared:
+            continue
+        placeholders = ",".join("?" * len(cleared))
+        outstanding = conn.execute(
+            f"SELECT COUNT(*) FROM jobs WHERE url IN ({placeholders}) "
+            "AND applied_at IS NULL", cleared).fetchone()[0]
+        if outstanding == 0:
+            mark_batch_submitted(conn, row["id"])
+            closed.append(row["id"])
+    return closed
