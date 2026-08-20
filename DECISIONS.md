@@ -504,3 +504,48 @@ disabling scoring altogether — the seniority and eligibility filters are load
 bearing, and 80 of 124 rows scored 1–2 for good reasons.
 **Revisit when:** the operator reviews scorer calibration (§4). This decision
 changes the floor, not the calibration question, which stays open.
+
+### D26 — The pipeline prepares applications; the operator submits them  (2026-08-20)
+**Decision:** `applypilot apply --fill-only`. The agent completes every field,
+uploads both documents, answers screening questions and clears validation
+errors, then stops before Submit and leaves the tab open. Jobs are marked
+`ready_for_review`, never `applied`.
+**Why:** the operator's call, and it is right on two counts. Most ATS terms of
+service are written against automated *submission*, not against a tool that
+prepares a form for a person to review and send — this lands on the defensible
+side of that line. And it dissolves the verification problem: after six
+submissions the database could not answer "did these actually send?", because
+proof capture records nothing. When he clicks Submit, he knows.
+**Replaces:** unattended auto-submit as the default path. `--no-gate` and
+ordinary `apply` still exist for when he wants them.
+**Rejected:** a CAPTCHA-solving service, repeatedly. It is excluded by security
+decision #17 and by ARCHITECTURE, it violates the terms of most of these sites,
+and fill-only removes the need — a human is present at exactly the moment a
+human is expected.
+
+### D27 — In fill-only, an unanswerable question is a blank, not a stall  (2026-08-20)
+**Decision:** fill-only overrides the personal-facts rule. The agent leaves the
+field empty, finishes the form, and lists every blank in its result note. It
+still never invents an answer and still never guesses a degree; this also
+replaces rule 2c, so an unresolvable degree dropdown is left unselected rather
+than parked.
+**Why:** a live run sat for minutes on "please list a professional reference —
+name, email, phone, title, relationship", waiting on an interactive terminal
+prompt nobody was sitting at. No profile can supply that. The escalation is
+correct for auto-submit, where a blank would be sent unseen; it is wrong when
+the operator reads every field before sending.
+**Rejected:** answering from inference. That is how the gaming-question answer
+happened, and it is the failure mode that costs credibility rather than time.
+
+### D28 — The window survives the run  (2026-08-20)
+**Decision:** in fill-only, Chrome is never closed — not between applications,
+not at the end of the run, not on Ctrl+C.
+**Why:** the filled tabs are the entire deliverable. Three separate paths were
+destroying them: an identity check that the adopt-existing-Chrome branch
+defeated by never assigning `persistent_chrome` (this lost a completed
+EBizCharge form), `kill_all_chrome()` in main's `finally`, and the same call in
+the SIGINT handler. A prepared application that disappears is worse than one
+never prepared, because it consumed the quota and produced nothing.
+**How it is kept:** `tests/test_fill_only.py` asserts no teardown inside the
+job loop, that every branch claims the window, and that both kill paths are
+guarded.
