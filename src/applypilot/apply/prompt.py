@@ -579,6 +579,7 @@ def _build_qa_section(doc_format: str | None = None) -> str:
 def build_prompt(job: dict, tailored_resume: str,
                  cover_letter: str | None = None,
                  dry_run: bool = False,
+                 fill_only: bool = False,
                  worker_id: int = 0,
                  doc_format: str = "pdf") -> str:
     """Build the full instruction prompt for the apply agent.
@@ -592,6 +593,8 @@ def build_prompt(job: dict, tailored_resume: str,
         tailored_resume: Plain-text content of the tailored resume.
         cover_letter: Optional plain-text cover letter content.
         dry_run: If True, tell the agent not to click Submit.
+        fill_only: If True, fill the form completely, stop before Submit, and
+            leave the tab open for the operator to review and submit by hand.
 
     Returns:
         Complete prompt string for the AI agent.
@@ -718,8 +721,29 @@ def build_prompt(job: dict, tailored_resume: str,
             optional_files_lines.append(f"{label}: {resolved}")
     optional_files_block = "\n".join(optional_files_lines)
 
-    # Dry-run: override submit instruction
-    if dry_run:
+    # Fill-only: the operator submits by hand. This is the compliant path —
+    # most ATS terms of service are written against automated submission, not
+    # against a tool that prepares a form for a person to review and send. It
+    # also removes the verification problem entirely: he sees what goes out.
+    post_submit_instruction = (
+        "Skip the cleanup below entirely. Do NOT close this tab and do NOT "
+        "navigate away — the completed form must stay on screen for the "
+        "operator. Stop here."
+        if fill_only else
+        "Continue with the post-submit checks below.")
+    if fill_only:
+        submit_instruction = (
+            "STOP BEFORE SUBMITTING. Do NOT click Submit, Apply, Send, or "
+            "Finish. Fill every field, upload the resume and cover letter, "
+            "answer every screening question, and resolve every validation "
+            "error so the form is complete and ready for a human to send.\n"
+            "     Then take a snapshot, confirm nothing is empty or invalid, "
+            "and LEAVE THIS TAB OPEN exactly as it is.\n"
+            "     If a CAPTCHA is present, leave it unsolved — the operator "
+            "will clear it when he reviews.\n"
+            "     Output RESULT:READY_FOR_REVIEW followed by a one-line note "
+            "of anything you could not fill and why.")
+    elif dry_run:
         submit_instruction = "IMPORTANT: Do NOT click the final Submit/Apply button. Review the form, verify all fields, then output RESULT:APPLIED with a note that this was a dry run."
     else:
         submit_instruction = "BEFORE clicking Submit/Apply, take a snapshot and review EVERY field on the page. Verify all data matches the APPLICANT PROFILE and TAILORED RESUME -- name, email, phone, location, work auth, resume uploaded, cover letter if applicable. If anything is wrong or missing, fix it FIRST. Only click Submit after confirming everything is correct."
@@ -1034,7 +1058,9 @@ in the KNOWN SCREENING ANSWERS section. The form will still be open in the brows
    - Compare every other field to the APPLICANT PROFILE. Fix mismatches. Fill empty fields.
 9. Answer screening questions using the rules above.
 10. {submit_instruction}
-11. After submit: browser_snapshot. Run CAPTCHA DETECT -- submit buttons often trigger invisible CAPTCHAs. If found, solve it (the form will auto-submit once the token clears, or you may need to click Submit again). Then check for new tabs (browser_tabs action: "list"). Switch to newest, close old. Snapshot to confirm submission. Look for "thank you" or "application received".
+11. {post_submit_instruction}
+
+11-normal. After submit: browser_snapshot. Run CAPTCHA DETECT -- submit buttons often trigger invisible CAPTCHAs. If found, solve it (the form will auto-submit once the token clears, or you may need to click Submit again). Then check for new tabs (browser_tabs action: "list"). Switch to newest, close old. Snapshot to confirm submission. Look for "thank you" or "application received".
     CLEANUP (after confirming submission or any terminal result):
     - browser_tabs action "list" — get all open tabs in this window.
     - For each tab that is NOT the homepage (http://localhost:{server_port}/), close it:

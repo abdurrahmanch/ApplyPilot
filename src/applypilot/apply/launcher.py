@@ -2005,6 +2005,7 @@ def _activate_agent_tab(port: int, timeout: float = 20.0) -> None:
 
 def run_job(job: dict, port: int, worker_id: int = 0,
             model: str = "sonnet", dry_run: bool = False,
+            fill_only: bool = False,
             skip_tab_reset: bool = False,
             extra_context: str | None = None) -> tuple[str, int, list[dict]]:
     """Spawn a Claude Code session for one job application.
@@ -2015,6 +2016,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         worker_id: Numeric worker identifier.
         model: Claude model name.
         dry_run: If True, don't click Submit.
+        fill_only: If True, fill the form and leave it for the operator to send.
         skip_tab_reset: If True, don't close leftover tabs (used after HITL/takeover).
         extra_context: Optional instructions from a previous human takeover, prepended
             to the agent prompt so it knows what was done.
@@ -2058,6 +2060,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         job=job,
         tailored_resume=resume_text,
         dry_run=dry_run,
+        fill_only=fill_only,
         worker_id=worker_id,
         doc_format=_doc_format,
     )
@@ -2358,6 +2361,18 @@ def run_job(job: dict, port: int, worker_id: int = 0,
 
         def _clean_reason(s: str) -> str:
             return re.sub(r'[*`"]+$', '', s).strip()
+
+        # Fill-only finishes here: the form is complete and waiting for the
+        # operator. Checked before APPLIED so a stray "applied" phrase in the
+        # agent's narration cannot promote a prepared form into a sent one.
+        if "RESULT:READY_FOR_REVIEW" in output:
+            note = ""
+            for out_line in output.splitlines():
+                if "RESULT:READY_FOR_REVIEW" in out_line:
+                    note = _clean_reason(out_line.split("RESULT:READY_FOR_REVIEW", 1)[-1].lstrip(": "))
+                    break
+            return (f"ready_for_review:{note}" if note else "ready_for_review",
+                    duration_ms, tool_calls)
 
         for result_status in ["APPLIED", "ALREADY_APPLIED", "SUCCESS", "EXPIRED", "CAPTCHA", "LOGIN_ISSUE"]:
             if f"RESULT:{result_status}" in output:

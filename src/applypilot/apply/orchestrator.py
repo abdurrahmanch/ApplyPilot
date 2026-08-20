@@ -146,6 +146,7 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 max_age_days: int | None = None,
                 headless: bool = False,
                 model: str = "sonnet", dry_run: bool = False,
+                fill_only: bool = False,
                 fresh_sessions: bool = False,
                 total_workers: int = 1,
                 no_hitl: bool = False,
@@ -189,7 +190,7 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
             worker_id, limit, target_url, min_score, max_score, max_age_days,
             headless, model, dry_run, fresh_sessions, applied, failed, continuous,
             jobs_done, empty_polls, port, total_workers, no_hitl=no_hitl,
-            require_gate=require_gate,
+            require_gate=require_gate, fill_only=fill_only,
         )
     finally:
         _stop_worker_listener(worker_id)
@@ -273,7 +274,7 @@ def _worker_loop_body(
     applied: int, failed: int, continuous: bool,
     jobs_done: int, empty_polls: int, port: int,
     total_workers: int = 1, no_hitl: bool = False,
-    require_gate: bool = True,
+    require_gate: bool = True, fill_only: bool = False,
 ) -> tuple[int, int]:
     """Main per-worker processing loop."""
     from applypilot.apply.launcher import (
@@ -403,7 +404,7 @@ def _worker_loop_body(
 
             result, duration_ms, screening_qs = run_job(
                 job, port=port, worker_id=worker_id,
-                model=model, dry_run=dry_run,
+                model=model, dry_run=dry_run, fill_only=fill_only,
                 skip_tab_reset=_this_had_interrupted_job,
                 extra_context=_reconnect_ctx,
             )
@@ -449,7 +450,29 @@ def _worker_loop_body(
                     update_state(worker_id, jobs_failed=failed)
                     break
 
+                elif result.startswith("ready_for_review"):
+                    # Filled but deliberately not sent. The tab stays open and
+                    # the operator submits by hand.
+                    note = result.split(":", 1)[-1] if ":" in result else ""
+                    mark_result(job["url"], "ready_for_review",
+                                note[:200] or "form filled, awaiting human submit",
+                                duration_ms=duration_ms)
+                    _record_job_history(worker_id, job, result, duration_ms)
+                    add_event(f"[W{worker_id}] READY for your review: "
+                              f"{(job.get('title') or '')[:32]}")
+                    break
+
                 elif result == "applied":
+                    if dry_run:
+                        # A dry run never submitted anything, so recording it as
+                        # applied is a lie the rest of the system then believes:
+                        # the job leaves the queue, the gate treats it as sent,
+                        # and it shows up in the submitted tally. Observed on a
+                        # real job (CAI) during the Workday OTP test.
+                        mark_result(job["url"], "failed", "dry_run (not submitted)",
+                                    duration_ms=duration_ms)
+                        add_event(f"[W{worker_id}] Dry run complete, NOT submitted")
+                        break
                     mark_result(job["url"], "applied", duration_ms=duration_ms)
                     _record_job_history(worker_id, job, result, duration_ms)
                     _record_submission_proof(job, "applied", ats_slug, worker_id,
@@ -502,7 +525,7 @@ def _worker_loop_body(
                                  start_time=time.time(), actions=0)
                     result, duration_ms, screening_qs = run_job(
                         job, port=port, worker_id=worker_id,
-                        model=model, dry_run=dry_run,
+                        model=model, dry_run=dry_run, fill_only=fill_only,
                         skip_tab_reset=True, extra_context=extra_ctx,
                     )
                     relaunch = True
@@ -565,7 +588,7 @@ def _worker_loop_body(
                                      start_time=time.time(), actions=0)
                         result, duration_ms, screening_qs = run_job(
                             job, port=port, worker_id=worker_id,
-                            model=model, dry_run=dry_run, skip_tab_reset=True)
+                            model=model, dry_run=dry_run, fill_only=fill_only, skip_tab_reset=True)
                         relaunch = True
                         continue
 
@@ -755,7 +778,8 @@ def main(limit: int = 1, target_url: str | None = None,
          dry_run: bool = False, continuous: bool = False,
          poll_interval: int = 60, workers: int = 1,
          fresh_sessions: bool = False, no_hitl: bool = False,
-         no_focus: bool = False, require_gate: bool = True) -> None:
+         no_focus: bool = False, require_gate: bool = True,
+         fill_only: bool = False) -> None:
     """Launch the apply pipeline.
 
     Args:
@@ -924,6 +948,7 @@ def main(limit: int = 1, target_url: str | None = None,
                         total_workers=workers,
                         no_hitl=no_hitl,
                         require_gate=require_gate,
+                        fill_only=fill_only,
                     ): i
                     for i in range(workers)
                 }

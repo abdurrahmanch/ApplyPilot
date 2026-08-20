@@ -205,6 +205,7 @@ def apply(
     mark_applied: Optional[str] = typer.Option(None, "--mark-applied", help="Manually mark a job URL as applied."),
     fresh_sessions: bool = typer.Option(False, "--fresh-sessions", help="Refresh Chrome session cookies from your real profile before launching."),
     no_hitl: bool = typer.Option(False, "--no-hitl", help="Skip HITL waits: park needs_human jobs and move on. Use for overnight runs."),
+    fill_only: bool = typer.Option(False, "--fill-only", help="Fill every form completely and STOP before Submit, leaving each tab open for you to review and send by hand."),
     no_gate: bool = typer.Option(False, "--no-gate", help="Bypass the review gate. Submits applications nobody approved — for debugging only."),
     no_focus: bool = typer.Option(False, "--no-focus", help="Prevent Chrome windows from stealing keyboard focus (Linux/GNOME only). Windows stay visible but won't interrupt your active app."),
     mark_failed: Optional[str] = typer.Option(None, "--mark-failed", help="Manually mark a job URL as failed (provide URL)."),
@@ -337,6 +338,8 @@ def apply(
     console.print(f"  Model:    {model}")
     console.print(f"  Headless: {headless}")
     console.print(f"  Dry run:  {dry_run}")
+    if fill_only:
+        console.print("  Mode:     [cyan]FILL ONLY — forms prepared, you submit[/cyan]")
     if no_gate:
         console.print("  Gate:     [red]BYPASSED — nothing here has been reviewed[/red]")
     if fresh_sessions:
@@ -360,6 +363,7 @@ def apply(
         no_hitl=no_hitl,
         no_focus=no_focus,
         require_gate=not no_gate,
+        fill_only=fill_only,
     )
 
 
