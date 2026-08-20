@@ -360,6 +360,10 @@ def _worker_loop_body(
                 chrome_proc = _AdoptedChromeProcess(_this_reconnect_pid)
                 with _chrome_lock:
                     _chrome_procs[worker_id] = chrome_proc
+                # An adopted window is still the run's window. Without this the
+                # identity check below saw a mismatch and tore it down after the
+                # first application, taking the filled tab with it.
+                persistent_chrome = chrome_proc
             elif persistent_chrome is not None and _chrome_is_alive(persistent_chrome):
                 # Same window as the last application. The agent opens a new
                 # tab; cookies and any captcha already cleared carry over.
@@ -690,11 +694,12 @@ def _worker_loop_body(
             failed += 1
             update_state(worker_id, jobs_failed=failed)
         finally:
-            # Deliberately NOT cleaning up between applications — the window
-            # stays open for the next one. It is torn down once, after the
-            # loop ends.
-            if chrome_proc and chrome_proc is not persistent_chrome:
-                cleanup_worker(worker_id, chrome_proc)
+            # Never tear the window down inside the loop. Identity comparison
+            # against persistent_chrome was too fragile — one branch that
+            # forgot to assign it closed the window and lost a completed form.
+            # Whatever opened it, it is the run's window and it survives.
+            if chrome_proc is not None and persistent_chrome is None:
+                persistent_chrome = chrome_proc
 
         if was_skipped:
             continue
@@ -712,13 +717,20 @@ def _worker_loop_body(
             add_event(f"[W{worker_id}] Pacing {gap:.0f}s before next application")
             _stop_event.wait(timeout=gap)
 
-    # The one teardown, after every application is done rather than between
-    # each of them.
     if persistent_chrome is not None:
-        try:
-            cleanup_worker(worker_id, persistent_chrome)
-        except Exception as e:
-            logger.warning("Could not close the persistent window: %s", e)
+        if fill_only:
+            # The completed forms ARE the deliverable. Closing the window at
+            # the end of the run would discard every one of them.
+            add_event(f"[W{worker_id}] Window left open — "
+                      "your filled applications are in its tabs")
+            logger.info("[worker-%d] fill-only: leaving Chrome open (pid %s) "
+                        "so the prepared forms survive", worker_id,
+                        getattr(persistent_chrome, "pid", "?"))
+        else:
+            try:
+                cleanup_worker(worker_id, persistent_chrome)
+            except Exception as e:
+                logger.warning("Could not close the persistent window: %s", e)
 
     update_state(worker_id, status="done", last_action="finished")
     return applied, failed
@@ -896,7 +908,10 @@ def main(limit: int = 1, target_url: str | None = None,
                 for wid, cproc in list(_claude_procs.items()):
                     if cproc.poll() is None:
                         _kill_process_tree(cproc.pid)
-            kill_all_chrome()
+            # Ctrl+C stops the agent, not the browser: in fill-only the tabs
+            # already prepared are the work product and must survive an abort.
+            if not fill_only:
+                kill_all_chrome()
             raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, _sigint_handler)
@@ -1025,5 +1040,14 @@ def main(limit: int = 1, target_url: str | None = None,
     finally:
         _stop_event.set()
         stop_health_checks()
-        kill_all_chrome()
+        if fill_only:
+            # The prepared forms live in that window's tabs and are the entire
+            # output of a fill-only run. kill_all_chrome() here would discard
+            # every one of them the moment the run finished.
+            console.print(
+                "\n[bold cyan]Chrome left open.[/bold cyan] Your prepared "
+                "applications are in its tabs — review each one and submit "
+                "them yourself.")
+        else:
+            kill_all_chrome()
         restore_focus_mode(_prev_focus_mode)

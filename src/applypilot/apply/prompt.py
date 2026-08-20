@@ -262,7 +262,7 @@ Writing style for every free-text answer -> The candidate's writing must never r
 EEO/demographics -> Use the values from APPLICANT PROFILE above (gender, race, veteran, disability). These are the candidate's actual preferences for disclosure."""
 
 
-def _build_hard_rules(profile: dict) -> str:
+def _build_hard_rules(profile: dict, fill_only: bool = False) -> str:
     """Build the hard rules section with work auth and name from profile."""
     personal = profile["personal"]
     work_auth = profile["work_authorization"]
@@ -284,6 +284,27 @@ def _build_hard_rules(profile: dict) -> str:
     if preferred_name and preferred_name != full_name.split()[0]:
         name_rule += f' Preferred name = {preferred_name}. Use "{display_name}" unless a field specifically says "legal name".'
 
+    # In fill-only mode an unanswerable question is not a reason to park: the
+    # operator reads every field before sending anyway, so a blank is simply a
+    # blank he fills. Escalating instead stalls the run on a terminal prompt
+    # nobody is sitting at — observed on "list a professional reference", which
+    # no profile could ever supply.
+    unknown_answer_rule = (
+        "\n5. FILL-ONLY — a screening question you cannot answer is NOT a "
+        "reason to stop.\n"
+        "   Do NOT output RESULT:NEEDS_HUMAN:screening_questions. Leave the "
+        "field EMPTY, finish the rest of the form, and list every field you "
+        "left blank in the RESULT:READY_FOR_REVIEW note.\n"
+        "   This covers references, personal facts and essay questions. The "
+        "operator completes and sends the form himself, so a blank costs "
+        "nothing and a guess costs credibility.\n"
+        "   This also replaces rule 2c: if a degree dropdown has no truthful "
+        "option, leave it unselected and note it rather than outputting "
+        "RESULT:NEEDS_HUMAN:education_dropdown. Everything else in rule 2 "
+        "stands.\n"
+        "   Still never invent an answer, and still never guess a degree."
+        if fill_only else "")
+
     return f"""== HARD RULES (never break these) ==
 1. Never lie about: citizenship, work authorization, criminal history, education credentials, security clearance, licenses.
 2. DEGREES. The EDUCATION block of the resume is the complete and final truth
@@ -303,7 +324,7 @@ def _build_hard_rules(profile: dict) -> str:
    and the candidate's credibility. Reasoning that it is the nearest match or
    that it avoids overclaiming does not make it true.
 3. {work_auth_rule}
-4. {name_rule}"""
+4. {name_rule}{unknown_answer_rule}"""
 
 
 def _build_site_credentials_section(site_credentials: dict) -> str:
@@ -646,7 +667,7 @@ def build_prompt(job: dict, tailored_resume: str,
     location_check = _build_location_check(profile, search_config)
     salary_section = _build_salary_section(profile)
     screening_section = _build_screening_section(profile)
-    hard_rules = _build_hard_rules(profile)
+    hard_rules = _build_hard_rules(profile, fill_only=fill_only)
     captcha_section = _build_captcha_section()
     qa_section = _build_qa_section(doc_format=doc_format)
 
