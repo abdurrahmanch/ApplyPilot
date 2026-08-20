@@ -1531,7 +1531,15 @@ def acquire_job(target_url: str | None = None,
                 cleared = gate["cleared"]
 
             blocked_sites, blocked_patterns = _load_blocked()
-            site_filter = " AND ".join(f"site != '{s}'" for s in blocked_sites) if blocked_sites else "1=1"
+            # Case-insensitive. sites.yaml lists 'google'; the scraper stores
+            # 'Google', and SQLite's != is case-sensitive on TEXT — so the
+            # blocklist silently passed a site it was written to block, and an
+            # explicitly blocked employer reached a review batch.
+            site_filter = (
+                "LOWER(COALESCE(j.site, '')) NOT IN ({})".format(
+                    ",".join("'" + s.lower().replace("'", "''") + "'"
+                             for s in blocked_sites))
+                if blocked_sites else "1=1")
             url_filter = " AND ".join(f"url NOT LIKE '{p}'" for p in blocked_patterns) if blocked_patterns else "1=1"
             max_score_filter = f"AND j.fit_score <= {max_score}" if max_score is not None else ""
 

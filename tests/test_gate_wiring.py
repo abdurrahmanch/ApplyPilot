@@ -403,3 +403,33 @@ def test_gate_stage_builds_a_batch(tmp_db, seed_job):
     result = _run_gate(min_score=8, max_age_days=0)
     assert result["status"] == "ok"
     assert get_pending_batch(conn)["id"] == result["batch_id"]
+
+
+def test_blocked_employers_never_reach_the_ready_set(tmp_db, seed_job, monkeypatch):
+    """sites.yaml lists 'google'; the scraper stores 'Google'. A case-sensitive
+    comparison let an explicitly blocked employer into a live review batch."""
+    from applypilot import config
+    from applypilot.review.prepare import collect_applications
+
+    monkeypatch.setattr(config, "load_blocked_sites",
+                        lambda: ({"google"}, []), raising=False)
+    conn = tmp_db()
+    seed_job(conn, url_suffix="goog", fit_score=9, site="Google",
+             application_url="https://careers.google.com/jobs/apply?id=1")
+
+    apps = collect_applications(conn, min_score=4, max_age_days=0)
+    assert [a["status"] for a in apps] == ["disqualified"]
+    assert "blocked" in apps[0]["reason"]
+
+
+def test_acquire_job_blocks_employers_case_insensitively(tmp_db, seed_job, monkeypatch):
+    _setup_apply_env(monkeypatch)
+    from applypilot import config
+    from applypilot.apply.launcher import acquire_job
+
+    monkeypatch.setattr(config, "load_blocked_sites",
+                        lambda: ({"google"}, []), raising=False)
+    conn = tmp_db()
+    seed_job(conn, url_suffix="goog", fit_score=10, site="Google")
+
+    assert acquire_job(min_score=4, max_age_days=0, require_gate=False) is None

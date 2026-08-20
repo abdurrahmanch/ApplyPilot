@@ -110,6 +110,25 @@ def anticipated_questions(conn, application_url: str | None) -> list[str]:
     return questions
 
 
+def _is_blocked_site(site: str | None, url: str | None) -> bool:
+    """Whether the submit phase would refuse this row as a blocked employer.
+
+    Matched case-insensitively: sites.yaml lists 'google', the scraper stores
+    'Google', and a case-sensitive comparison let an explicitly blocked
+    employer through into a review batch.
+    """
+    try:
+        from applypilot.config import load_blocked_sites
+        blocked, patterns = load_blocked_sites()
+    except Exception:  # pragma: no cover - config guard only
+        return False
+    if site and site.lower() in {b.lower() for b in blocked}:
+        return True
+    lowered = (url or "").lower()
+    return any(p.strip("%").lower() in lowered
+               for p in patterns if p.strip("%"))
+
+
 def _is_manual_ats(application_url: str | None) -> bool:
     """Whether the submit phase would refuse this URL as manual-only."""
     if not application_url:
@@ -177,7 +196,8 @@ def ready_applications(conn, min_score: int, max_age_days: int | None,
         "questions": anticipated_questions(conn, row["application_url"]),
         "status": "ready",
     } for row in _prepared_rows(conn, min_score, max_age_days, limit)
-        if not _is_manual_ats(row["application_url"])]
+        if not _is_manual_ats(row["application_url"])
+        and not _is_blocked_site(row["site"], row["url"])]
 
 
 def manual_only_applications(conn, min_score: int,
@@ -192,9 +212,12 @@ def manual_only_applications(conn, min_score: int,
         "title": row["title"],
         "company": row["company"] or row["site"],
         "status": "disqualified",
-        "reason": "ATS requires a manual application",
+        "reason": ("employer is on the blocked list"
+                   if _is_blocked_site(row["site"], row["url"])
+                   else "ATS requires a manual application"),
     } for row in _prepared_rows(conn, min_score, max_age_days)
-        if _is_manual_ats(row["application_url"])]
+        if _is_manual_ats(row["application_url"])
+        or _is_blocked_site(row["site"], row["url"])]
 
 
 def disqualified_applications(conn, min_score: int,
