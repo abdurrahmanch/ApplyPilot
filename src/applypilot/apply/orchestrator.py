@@ -195,6 +195,14 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
         _stop_worker_listener(worker_id)
 
 
+def _chrome_is_alive(proc) -> bool:
+    """Whether the persistent window is still usable for another application."""
+    try:
+        return proc is not None and proc.poll() is None
+    except Exception:
+        return False
+
+
 class _AtsCooledDown(Exception):
     """Raised to abandon one job because its ATS is cooling down."""
 
@@ -277,6 +285,13 @@ def _worker_loop_body(
     # If a previous run was killed while Chrome was running, adopt the existing
     # browser and resume the interrupted job rather than starting fresh.
     _reconnect_pid, _reconnect_url = _probe_for_reconnect(worker_id, port)
+
+    # One window for the whole run, a tab per application (operator's call,
+    # 2026-08-20). Launching a fresh browser per job meant a cold profile every
+    # time: no cookies, no history, no prior ATS session — which is both a bot
+    # signal and the reason a solved captcha never carried to the next job.
+    # It also opened a window per application, which is unusable to watch.
+    persistent_chrome = None
     # ─────────────────────────────────────────────────────────────────────────
 
     while not _stop_event.is_set():
@@ -344,12 +359,18 @@ def _worker_loop_body(
                 chrome_proc = _AdoptedChromeProcess(_this_reconnect_pid)
                 with _chrome_lock:
                     _chrome_procs[worker_id] = chrome_proc
+            elif persistent_chrome is not None and _chrome_is_alive(persistent_chrome):
+                # Same window as the last application. The agent opens a new
+                # tab; cookies and any captcha already cleared carry over.
+                chrome_proc = persistent_chrome
+                add_event(f"[W{worker_id}] Reusing the open window (new tab)")
             else:
                 add_event(f"[W{worker_id}] Launching Chrome...")
                 chrome_proc = launch_chrome(worker_id, port=port, headless=headless,
                                             refresh_cookies=fresh_sessions,
                                             ats_slug=ats_slug,
                                             total_workers=total_workers)
+                persistent_chrome = chrome_proc
 
             with _worker_state_lock:
                 ws = _worker_state.get(worker_id)
@@ -488,6 +509,23 @@ def _worker_loop_body(
                     continue
 
                 elif result.startswith("needs_human:"):
+                    # A captcha is the ATS telling us it thinks we are a bot.
+                    # Cooling down only fired on the `failed` branch, so a
+                    # challenge parked the job and the run then sent the next
+                    # worker straight back at the same ATS. One Greenhouse
+                    # challenge became six: repeated attempts after a challenge
+                    # are what confirm automation rather than deny it.
+                    if ats_slug and result.split(":", 2)[1:2] == ["captcha"]:
+                        try:
+                            from applypilot.apply.pacing import cool_down_ats
+                            cool_down_ats(get_connection(), ats_slug,
+                                          "captcha challenge")
+                            add_event(f"[W{worker_id}] {ats_slug} challenged; "
+                                      "cooling down for the rest of the run")
+                        except Exception as cooldown_err:
+                            logger.warning("Cooldown on %s failed: %s",
+                                           ats_slug, cooldown_err)
+
                     # Parse reason and URL (optional |detail:... suffix from agent)
                     after = result[len("needs_human:"):]
                     if ":" in after:
@@ -629,7 +667,10 @@ def _worker_loop_body(
             failed += 1
             update_state(worker_id, jobs_failed=failed)
         finally:
-            if chrome_proc:
+            # Deliberately NOT cleaning up between applications — the window
+            # stays open for the next one. It is torn down once, after the
+            # loop ends.
+            if chrome_proc and chrome_proc is not persistent_chrome:
                 cleanup_worker(worker_id, chrome_proc)
 
         if was_skipped:
@@ -647,6 +688,14 @@ def _worker_loop_body(
             gap = _random.uniform(*APPLICATION_DELAY_RANGE)
             add_event(f"[W{worker_id}] Pacing {gap:.0f}s before next application")
             _stop_event.wait(timeout=gap)
+
+    # The one teardown, after every application is done rather than between
+    # each of them.
+    if persistent_chrome is not None:
+        try:
+            cleanup_worker(worker_id, persistent_chrome)
+        except Exception as e:
+            logger.warning("Could not close the persistent window: %s", e)
 
     update_state(worker_id, status="done", last_action="finished")
     return applied, failed

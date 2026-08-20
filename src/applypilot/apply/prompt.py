@@ -898,7 +898,16 @@ The pipeline operator will provide answers. The agent will be relaunched with yo
 in the KNOWN SCREENING ANSWERS section. The form will still be open in the browser.
 
 == STEP-BY-STEP ==
-1. browser_navigate to the job URL.
+1. Open a NEW TAB for this application, then navigate it to the job URL.
+   The window is shared across every application in this run and stays open,
+   so previous applications are still in their own tabs. Use the tab tool if
+   you have one (browser_tabs / browser_tab_new); if you do not, browser_navigate
+   in the current tab is acceptable. NEVER close tabs belonging to earlier
+   applications and never close the window.
+
+   Because the window persists, cookies and any captcha already cleared on this
+   ATS carry over from earlier applications. If a page loads already signed in,
+   that is expected — do not sign out and do not create a second account.
 1a. LINKEDIN LANGUAGE CHECK (LinkedIn URLs only — skip for all other sites):
    After navigating to any linkedin.com page, take a browser_snapshot. If the UI is NOT in English
    (e.g., you see "Postuler", "Bewerben", "Candidatar", "Следующий", or any non-English button labels
