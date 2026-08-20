@@ -66,12 +66,20 @@ STRUCTURE: 3 paragraphs. TARGET 150-200 words. Half a page, maximum. Letters ove
 
 Short and specific beats long and thorough. A reader spends seconds on this. Every sentence must carry a verifiable specific — a system, a tool, a client, a number. If a sentence could appear in someone else's letter, cut it.
 
-PARAGRAPH 1 — HOOK (2-3 sentences, ~50 words): Open with one concrete thing specific to THIS company: a product they ship, the stack in the posting, the problem they are hiring to solve. Then name the work you have done that addresses it. Not "I'm excited about this role." Start with the work.
+PARAGRAPH 1 — OPENING (2-3 sentences, ~50 words): Warm and plain-spoken. Say what draws you to this role and this company in ordinary language, then bridge into the kind of work you have done that fits it.
+
+Keep it light on jargon. AT MOST one tool or technology name in this paragraph, and none is fine. Do NOT open by explaining the company's own technical problem back to them: lines like "Your Variable Frequency Drive firmware requires rigorous testing" or "Your platform orchestrates game servers across regions" read as lecturing a stranger about their own business. Refer to what they do at a human level, the way you would mention it to a friend.
+
+The technical proof belongs in paragraph 2. This paragraph only has to make someone want to keep reading.
 
 PARAGRAPH 2 — EVIDENCE (3-4 sentences, ~100 words): Map 2-3 facts from the resume onto the role's stated needs. Name the problem, the concrete action (specific tools, architecture decisions), and the outcome. Use real numbers where the resume has them; never invent one.{projects_hint}{metrics_hint}
 If COMPANY is marked unknown, infer the employer from the job description. If the description doesn't name it either, write about the team's product and problem domain WITHOUT naming any company. NEVER treat the job board the listing came from (LinkedIn, Indeed, etc.) as the employer.
 
-PARAGRAPH 3 — CLOSE (1-2 sentences, ~25 words): Offer to go deeper on one SPECIFIC topic from the evidence paragraph, naming the actual system or decision. Write it in your own words; no stock closers ("Happy to walk through...", "I'd welcome the chance to discuss..."). Then sign off.
+PARAGRAPH 3 — CLOSE (2-3 sentences, ~35 words): Warm and human. Say plainly that you would like to meet and talk about the role. Natural phrasings to draw on, in your own words: "I would love to sit down with you", "I would really like to meet the team", "I would be glad to talk this through in person".
+
+You may name one thing from paragraph 2 you would enjoy talking about, but keep it conversational, not a technical pitch. No hard sell, no listing skills again, no restating why you are qualified. End on the person, not the resume.
+
+Then sign off on its own line.
 
 DO NOT repeat a phrase across paragraphs. If "responsive design" or "full stack" appears twice, rewrite one of them.
 
@@ -90,7 +98,8 @@ VOICE:
 - NEVER narrate or explain what you're doing. BAD: "This demonstrates my commitment to X." GOOD: Just state the fact and move on.
 - NEVER hedge. BAD: "might address some of your challenges." GOOD: "solves the same problem your team is facing."
 - NEVER use "Also," to start a sentence. NEVER use "Furthermore," or "Additionally,".
-- Every sentence should contain either a number, a tool name, or a specific outcome. If it doesn't, cut it.
+- In PARAGRAPH 2, every sentence should carry a number, a tool name, or a specific outcome. Paragraphs 1 and 3 are deliberately exempt: forcing a specific into the opening and the close is what makes a letter read like a datasheet instead of a person.
+- Overall the letter should sound like a capable person who is genuinely interested, not like someone proving they already know the company better than the reader does.
 - Read it out loud. If it sounds like a robot wrote it, rewrite it.
 
 ADDITIONAL BANNED PHRASES:
