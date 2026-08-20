@@ -8,7 +8,11 @@
 # are flagged as "manual" during apply — bot skips, user applies by hand.
 manual_ats:
   - "ibegin.tcsapps.com"       # TCS iBegin — unsolvable CAPTCHA every time
-  - "myworkdayjobs.com"        # Workday — requires account login, can't automate
+  # myworkdayjobs.com removed 2026-08-20 for the OTP experiment. Workday needs
+  # an account and an emailed verification code; the browser-session Gmail
+  # reader can now retrieve that code, so whether Workday is automatable is a
+  # live question rather than a settled no. Workday is 24% of the queue.
+  # RESTORE THIS LINE if the experiment fails.
 
 # ── Blocked sites — too problematic for automation ───────────────────────
 blocked:
@@ -37,7 +41,10 @@ no_signup_domains:
   - "dice.com"
   - "lever.co"
   - "greenhouse.io"
-  - "myworkdayjobs.com"
+  # myworkdayjobs.com removed 2026-08-20 alongside the manual_ats entry: the
+  # agent has to be allowed to create the account, because the verification
+  # email only fires as part of signup. RESTORE THIS LINE if the experiment
+  # fails.
 
 # ── Blocked SSO domains — cannot authenticate through these ──────────────
 blocked_sso:

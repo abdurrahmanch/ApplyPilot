@@ -86,8 +86,14 @@ def _build_profile_summary(profile: dict) -> str:
     if exp.get("education_level"):
         lines.append(f"Education: {exp['education_level']}")
 
-    # Certifications (from resume_facts)
+    # The exact education truth, so no form ever has to be guessed at. An
+    # agent left to infer picked "Associates of Science" for a school that
+    # awarded nothing, reasoning it was the closest match.
     resume_facts = p.get("resume_facts", {})
+    if resume_facts.get("education_truth"):
+        lines.append(f"EDUCATION (exact, do not infer): {resume_facts['education_truth']}")
+
+    # Certifications (from resume_facts)
     certs = resume_facts.get("certifications", [])
     if certs:
         lines.append(f"Certifications: {', '.join(certs)}")
@@ -280,8 +286,24 @@ def _build_hard_rules(profile: dict) -> str:
 
     return f"""== HARD RULES (never break these) ==
 1. Never lie about: citizenship, work authorization, criminal history, education credentials, security clearance, licenses.
-2. {work_auth_rule}
-3. {name_rule}"""
+2. DEGREES. The EDUCATION block of the resume is the complete and final truth
+   about what was earned. If a school is listed with no degree named, NO DEGREE
+   WAS EARNED THERE. Attendance dates are not a degree.
+   When a degree dropdown is required for such a school, in this order:
+     a. choose an option meaning none — "No Degree", "None", "Did Not Complete",
+        "Some College", "Coursework Only";
+     b. if the dropdown has no such option, leave the whole education entry off
+        the application rather than naming a degree;
+     c. if the entry cannot be removed and a degree must be chosen, STOP and
+        output RESULT:NEEDS_HUMAN:education_dropdown with the school and the
+        available options.
+   NEVER pick the "closest" degree. There is no closest. Selecting
+   "Associates of Science" for a school that awarded nothing is a fabricated
+   credential, it is checked at background screening, and it costs the offer
+   and the candidate's credibility. Reasoning that it is the nearest match or
+   that it avoids overclaiming does not make it true.
+3. {work_auth_rule}
+4. {name_rule}"""
 
 
 def _build_site_credentials_section(site_credentials: dict) -> str:

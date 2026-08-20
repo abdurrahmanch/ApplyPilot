@@ -75,11 +75,36 @@ The technical proof belongs in paragraph 2. This paragraph only has to make some
 PARAGRAPH 2 — EVIDENCE (3-4 sentences, ~100 words): Map 2-3 facts from the resume onto the role's stated needs. Name the problem, the concrete action (specific tools, architecture decisions), and the outcome. Use real numbers where the resume has them; never invent one.{projects_hint}{metrics_hint}
 If COMPANY is marked unknown, infer the employer from the job description. If the description doesn't name it either, write about the team's product and problem domain WITHOUT naming any company. NEVER treat the job board the listing came from (LinkedIn, Indeed, etc.) as the employer.
 
-PARAGRAPH 3 — CLOSE (2-3 sentences, ~35 words): Warm and human. Say plainly that you would like to meet and talk about the role. Natural phrasings to draw on, in your own words: "I would love to sit down with you", "I would really like to meet the team", "I would be glad to talk this through in person".
+PARAGRAPH 3 — CLOSE (2 sentences, ~30 words): Warm and human.
 
-You may name one thing from paragraph 2 you would enjoy talking about, but keep it conversational, not a technical pitch. No hard sell, no listing skills again, no restating why you are qualified. End on the person, not the resume.
+THE FIRST SENTENCE MUST BE AN INVITATION TO MEET, phrased in the first person and directed at the reader. Use one of these, or something equally plain and warm in your own words:
+  "I would love to sit down with you and talk about the role."
+  "I would really like to meet the team and hear more about where you are headed."
+  "I would be glad to come in and talk this through in person."
 
-Then sign off on its own line.
+The second sentence is optional warmth — something you are curious about, or that you would enjoy hearing how they think about it. Keep it conversational.
+
+FORBIDDEN in this paragraph, because they turn an invitation back into a pitch:
+  - "how my background fits your needs"
+  - "discussing your approach to <technical topic>"
+  - "talk through how this background fits"
+  - any restatement of your skills, tools, or qualifications
+  - any sentence whose subject is your experience rather than the two of you meeting
+
+If the closing paragraph does not contain the words "would love", "would really like", or "would be glad", rewrite it.
+
+Then a sign-off line: "Sincerely," followed by the name on the next line.
+
+AI AND AGENTIC WORK — how to say it:
+Never name the specific tool. "I use Claude Code", "I use Copilot", "I use ChatGPT" reads as tool trivia and dates badly.
+
+The supportable claim is architectural, and it is worth making because most candidates cannot make it: he designs and directs multi-agent LLM workflows. He has authored pipelines that decompose work across specialist agents, each with a bounded remit, wired together with explicit human review gates. That is orchestration and system design, not prompting.
+
+Phrase it as direction, not usage. Good: "I architect multi-agent LLM workflows, decomposing work across specialist agents with explicit review gates." "I direct LLM agents the way you would run a small team, scoping each one's remit and gating the handoffs." Bad: "I use AI to code faster." "I am proficient with AI tools."
+
+Also supportable from the resume: LLM API integration, RAG, vector search (pgvector, ChromaDB, Meilisearch).
+
+At most ONE sentence on this, in paragraph 2, and only when the role touches AI, automation, platform, or developer tooling. On a role where it is irrelevant, leave it out entirely.
 
 DO NOT repeat a phrase across paragraphs. If "responsive design" or "full stack" appears twice, rewrite one of them.
 
@@ -89,7 +114,8 @@ BANNED WORDS/PHRASES (using ANY of these = instant rejection):
 "leverage", "leveraging", "robust", "driven", "dedicated", "committed to",
 "I look forward to hearing from you", "great fit", "unique opportunity",
 "commitment to excellence", "dynamic team", "fast-paced environment",
-"I am writing to express", "caught my eye", "caught my attention"
+"I am writing to express", "caught my eye", "caught my attention",
+"Claude Code", "Copilot", "ChatGPT", "I use AI", "AI-powered", "AI-assisted"
 
 BANNED PUNCTUATION: No em dashes. Use commas or periods.
 
